@@ -1,0 +1,15 @@
+{
+  "packageDirectories": [
+    {
+      "path": "force-app",
+      "default": true,
+      "package": "FuruAgentBar",
+      "versionName": "v1.0 — Navigate, Fill, Update, Search",
+      "versionNumber": "1.0.0.NEXT"
+    }
+  ],
+  "name": "furu-agent-bar",
+  "namespace": "",
+  "sfdcLoginUrl": "https://login.salesforce.com",
+  "sourceApiVersion": "62.0"
+}

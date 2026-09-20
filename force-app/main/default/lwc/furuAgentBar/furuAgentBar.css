@@ -1,0 +1,203 @@
+/* ── Container ──────────────────────────────────────────────────────────────── */
+.furu-bar {
+    font-family: -apple-system, 'Salesforce Sans', sans-serif;
+    background: #0a0a0f;
+    border-top: 1px solid #1e1e2e;
+    padding: 0 8px;
+    min-width: 320px;
+}
+
+/* ── Input row ──────────────────────────────────────────────────────────────── */
+.furu-bar__input-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 44px;
+}
+
+.furu-bar__logo {
+    font-size: 16px;
+    flex-shrink: 0;
+    opacity: 0.85;
+}
+
+.furu-bar__input {
+    flex: 1;
+    background: #111122;
+    border: 1px solid #2a2a4a;
+    border-radius: 6px;
+    color: #e2e8f0;
+    font-size: 13px;
+    height: 30px;
+    padding: 0 10px;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.furu-bar__input:focus {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25);
+}
+
+.furu-bar__input::placeholder { color: #4a4a6a; }
+
+.furu-bar__input:disabled { opacity: 0.5; }
+
+/* ── Context pill ───────────────────────────────────────────────────────────── */
+.furu-bar__ctx-pill {
+    background: #1e1e3a;
+    border: 1px solid #3a3a5a;
+    border-radius: 12px;
+    color: #818cf8;
+    font-size: 10px;
+    padding: 2px 8px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* ── Submit button ──────────────────────────────────────────────────────────── */
+.furu-bar__submit {
+    background: #4f46e5;
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 700;
+    height: 30px;
+    width: 34px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+}
+
+.furu-bar__submit:hover:not(:disabled) { background: #4338ca; }
+.furu-bar__submit:disabled { background: #2d2d4a; cursor: not-allowed; }
+
+/* ── Spinner ────────────────────────────────────────────────────────────────── */
+.furu-bar__spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: furu-spin 0.7s linear infinite;
+}
+
+@keyframes furu-spin { to { transform: rotate(360deg); } }
+
+/* ── Status bar ─────────────────────────────────────────────────────────────── */
+.furu-bar__status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+    border-top: 1px solid #1e1e2e;
+    border-radius: 0 0 4px 4px;
+}
+
+.furu-bar__status--success { background: #0d2b1a; color: #34d399; }
+.furu-bar__status--error   { background: #2b0d0d; color: #f87171; }
+.furu-bar__status--warning { background: #2b2000; color: #fbbf24; }
+.furu-bar__status--info    { background: #0d1a2b; color: #93c5fd; }
+
+.furu-bar__status-text { flex: 1; }
+
+.furu-bar__status-icon { flex-shrink: 0; }
+
+.furu-bar__dismiss,
+.furu-bar__undo {
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    color: inherit;
+    cursor: pointer;
+    font-size: 11px;
+    padding: 1px 6px;
+    opacity: 0.75;
+}
+
+.furu-bar__dismiss:hover,
+.furu-bar__undo:hover { opacity: 1; }
+
+/* ── Search results ─────────────────────────────────────────────────────────── */
+.furu-bar__results {
+    background: #111122;
+    border-top: 1px solid #2a2a4a;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.furu-bar__results-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 10px;
+    font-size: 11px;
+    color: #64748b;
+    border-bottom: 1px solid #1e1e2e;
+}
+
+.furu-bar__result-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.furu-bar__result-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    cursor: pointer;
+    border-bottom: 1px solid #1a1a2e;
+    transition: background 0.1s;
+}
+
+.furu-bar__result-row:hover { background: #1a1a3a; }
+
+.furu-bar__result-type {
+    background: #1e1e3a;
+    border-radius: 10px;
+    color: #818cf8;
+    font-size: 10px;
+    padding: 1px 6px;
+    flex-shrink: 0;
+}
+
+.furu-bar__result-name { color: #e2e8f0; font-size: 13px; font-weight: 500; flex: 1; }
+
+.furu-bar__result-sub { color: #64748b; font-size: 11px; }
+
+/* ── Pre-fill bar ───────────────────────────────────────────────────────────── */
+.furu-bar__prefill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background: #1a1a0a;
+    border-top: 1px solid #3a3a1a;
+    font-size: 12px;
+    color: #fde68a;
+}
+
+.furu-bar__action-btn {
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    color: inherit;
+    cursor: pointer;
+    font-size: 11px;
+    padding: 2px 8px;
+}
+
+.furu-bar__action-btn--save {
+    background: #166534;
+    border-color: #16a34a;
+    color: #86efac;
+}
+
+.furu-bar__action-btn--save:hover { background: #15803d; }

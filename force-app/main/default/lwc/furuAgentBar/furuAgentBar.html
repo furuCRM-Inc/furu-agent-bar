@@ -1,0 +1,78 @@
+<template>
+    <div class="furu-bar">
+
+        <!-- ── Input row ─────────────────────────────────────────── -->
+        <div class="furu-bar__input-row">
+            <span class="furu-bar__logo" title="furuAgent">⚡</span>
+
+            <input
+                class="furu-bar__input"
+                type="text"
+                placeholder="Navigate, fill, update or search... (Enter to run)"
+                value={inputText}
+                oninput={handleInput}
+                onkeydown={handleKeyDown}
+                disabled={isLoading}
+            />
+
+            <!-- Context pill: shows current page sObject -->
+            <template lwc:if={contextLabel}>
+                <span class="furu-bar__ctx-pill">{contextLabel}</span>
+            </template>
+
+            <button
+                class="furu-bar__submit"
+                onclick={handleSubmit}
+                disabled={isLoading}
+                title="Run (Enter)"
+            >
+                <template lwc:if={isLoading}>
+                    <div class="furu-bar__spinner"></div>
+                </template>
+                <template lwc:else>→</template>
+            </button>
+        </div>
+
+        <!-- ── Status / confirmation bar ────────────────────────── -->
+        <template lwc:if={statusMessage}>
+            <div class={statusClass}>
+                <span class="furu-bar__status-icon">{statusIcon}</span>
+                <span class="furu-bar__status-text">{statusMessage}</span>
+                <template lwc:if={showUndo}>
+                    <button class="furu-bar__undo" onclick={handleUndo}>Undo</button>
+                </template>
+                <button class="furu-bar__dismiss" onclick={dismissStatus}>✕</button>
+            </div>
+        </template>
+
+        <!-- ── Search results ────────────────────────────────────── -->
+        <template lwc:if={hasResults}>
+            <div class="furu-bar__results">
+                <div class="furu-bar__results-header">
+                    <span>{resultCount} result(s) — click to navigate</span>
+                    <button class="furu-bar__dismiss" onclick={dismissResults}>✕</button>
+                </div>
+                <ul class="furu-bar__result-list">
+                    <template for:each={searchResults} for:item="row">
+                        <li key={row.Id} class="furu-bar__result-row" onclick={handleResultClick} data-id={row.Id} data-type={row.type}>
+                            <span class="furu-bar__result-type">{row.type}</span>
+                            <span class="furu-bar__result-name">{row.Name}</span>
+                            <span class="furu-bar__result-sub">{row.sub}</span>
+                        </li>
+                    </template>
+                </ul>
+            </div>
+        </template>
+
+        <!-- ── Pre-fill confirmation ──────────────────────────────── -->
+        <template lwc:if={hasPrefill}>
+            <div class="furu-bar__prefill">
+                <span class="furu-bar__status-icon">✏️</span>
+                <span class="furu-bar__status-text">{prefillSummary}</span>
+                <button class="furu-bar__action-btn furu-bar__action-btn--save" onclick={handleSavePrefill}>Save</button>
+                <button class="furu-bar__action-btn" onclick={dismissPrefill}>Discard</button>
+            </div>
+        </template>
+
+    </div>
+</template>

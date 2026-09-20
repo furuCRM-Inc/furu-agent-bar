@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LightningMessageChannel xmlns="http://soap.sforce.com/2006/04/metadata">
+    <masterLabel>FuruAgentMessage</masterLabel>
+    <isExposed>true</isExposed>
+    <description>Bus between furuAgentBar utility bar and page-side LWC components for field pre-fill coordination</description>
+    <lightningMessageFields>
+        <fieldName>action</fieldName>
+        <description>PREFILL | HIGHLIGHT | CLEAR</description>
+    </lightningMessageFields>
+    <lightningMessageFields>
+        <fieldName>sObjectType</fieldName>
+        <description>API name of the target sObject</description>
+    </lightningMessageFields>
+    <lightningMessageFields>
+        <fieldName>recordId</fieldName>
+        <description>Target record ID (optional)</description>
+    </lightningMessageFields>
+    <lightningMessageFields>
+        <fieldName>fields</fieldName>
+        <description>JSON string of fieldApiName: value pairs to pre-fill</description>
+    </lightningMessageFields>
+</LightningMessageChannel>
