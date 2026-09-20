@@ -135,16 +135,20 @@ public with sharing class FuruAgentController {
             a.fields = (Map<String, Object>) rawFields;
         }
 
-        // Navigation
+        // Navigation — LLM may use target_sobject or search_sobject or sObjectType
         a.targetRecordId = (String) r.get('target_record_id');
-        a.targetSObject  = (String) r.get('target_sobject');
         a.targetUrl      = (String) r.get('target_url');
+        String navSObj = (String) r.get('target_sobject');
+        if (String.isBlank(navSObj)) navSObj = (String) r.get('search_sobject');
+        if (String.isBlank(navSObj)) navSObj = (String) r.get('sObjectType');
+        if (String.isBlank(navSObj)) navSObj = sObjectType;
+        a.targetSObject = navSObj;
 
-        // If navigate intent but no recordId yet — run SOQL to find it
-        if (a.intent == 'NAVIGATE' && String.isBlank(a.targetRecordId) && String.isNotBlank(a.targetSObject)) {
+        // No recordId yet — run SOQL by name to resolve it
+        if (a.intent == 'NAVIGATE' && String.isBlank(a.targetRecordId)) {
             String searchName = (String) r.get('search_name');
-            if (String.isNotBlank(searchName)) {
-                a.targetRecordId = findRecordId(a.targetSObject, searchName);
+            if (String.isNotBlank(searchName) && String.isNotBlank(navSObj)) {
+                a.targetRecordId = findRecordId(navSObj, searchName);
             }
         }
         return a;
