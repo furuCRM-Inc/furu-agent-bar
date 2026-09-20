@@ -169,8 +169,8 @@ public with sharing class FuruAgentController {
         ];
 
         List<Map<String, Object>> rows = new List<Map<String, Object>>();
-        for (List<SObject> group : results) {
-            for (SObject rec : group) {
+        for (List<SObject> soslGroup : results) {
+            for (SObject rec : soslGroup) {
                 Map<String, Object> row = new Map<String, Object>{
                     'id'   => rec.Id,
                     'type' => rec.getSObjectType().getDescribe().getLabel()
