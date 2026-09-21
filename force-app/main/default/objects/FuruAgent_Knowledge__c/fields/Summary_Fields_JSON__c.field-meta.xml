@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Summary_Fields_JSON__c</fullName>
+    <label>Summary Fields JSON</label>
+    <type>LongTextArea</type>
+    <length>32768</length>
+    <visibleLines>3</visibleLines>
+    <description>Serialized JSON array of SummaryField objects defining which fields appear in the FlashBar record summary card. Keyed by Target_sObject__c = '__SUMMARY__:ObjectApiName'. Populated by FlashBarSummaryService with 24-hour TTL.</description>
+</CustomField>

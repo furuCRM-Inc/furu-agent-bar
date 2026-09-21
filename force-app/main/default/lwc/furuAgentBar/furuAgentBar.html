@@ -1,60 +1,273 @@
 <template>
     <div class="furu-bar">
 
-        <!-- ── Input row ─────────────────────────────────────────── -->
-        <div class="furu-bar__input-row">
-            <span class="furu-bar__logo" title="furuAgent">⚡</span>
+        <!-- ── Input card ─────────────────────────────────────────────── -->
+        <div class={inputCardClass}
+             ondragover={handleDragOver}
+             ondragleave={handleDragLeave}
+             ondrop={handleDrop}>
 
-            <input
-                class="furu-bar__input"
-                type="text"
-                placeholder="Navigate, fill, update or search... (Enter to run)"
-                value={inputText}
-                oninput={handleInput}
-                onkeydown={handleKeyDown}
-                disabled={isLoading}
-            />
-
-            <!-- Context pill: shows current page sObject -->
-            <template lwc:if={contextLabel}>
-                <span class="furu-bar__ctx-pill">{contextLabel}</span>
+            <!-- Drop overlay — appears when dragging a file over the card -->
+            <template lwc:if={isDragOver}>
+                <div class="furu-bar__drop-overlay">
+                    <span class="furu-bar__drop-icon">📄</span>
+                    <span class="furu-bar__drop-label">名刺・書類をドロップ</span>
+                </div>
             </template>
 
-            <button
-                class="furu-bar__submit"
-                onclick={handleSubmit}
-                disabled={isLoading}
-                title="Run (Enter)"
-            >
-                <template lwc:if={isLoading}>
-                    <div class="furu-bar__spinner"></div>
+            <!-- OCR loading overlay -->
+            <template lwc:if={isOcrLoading}>
+                <div class="furu-bar__drop-overlay furu-bar__drop-overlay--ocr">
+                    <div class="furu-bar__spinner furu-bar__spinner--lg"></div>
+                    <span class="furu-bar__drop-label">Agentforce Vision 解析中...</span>
+                    <span class="furu-bar__drop-file">📎 {_attachedFileName}</span>
+                </div>
+            </template>
+
+            <!-- Context header -->
+            <div class="furu-bar__header">
+                <span class="furu-bar__logo" title="FlashBar for Salesforce">⚡</span>
+                <span class="furu-bar__brand">FlashBar AI</span>
+                <template lwc:if={contextLabel}>
+                    <span class="furu-bar__ctx-pill">{contextLabel}</span>
                 </template>
-                <template lwc:else>→</template>
-            </button>
+                <span class="furu-bar__spacer"></span>
+                <template lwc:if={hasCredits}>
+                    <span class="furu-bar__credits" title="無料AIクレジット残高">{creditLabel}</span>
+                </template>
+                <template lwc:if={charCount}>
+                    <span class="furu-bar__charcount">{charCount}</span>
+                </template>
+                <template lwc:if={isAdmin}>
+                    <button class="furu-bar__gear-btn" onclick={openSettings} title="ルール管理" type="button">
+                        ⚙️<template lwc:if={pendingBadge}><span class="furu-bar__gear-badge">{pendingBadge}</span></template>
+                    </button>
+                </template>
+            </div>
+
+            <!-- Auto-expanding textarea -->
+            <textarea
+                class="furu-bar__textarea"
+                placeholder={i18n.placeholder}
+                oninput={handleInputAutoResize}
+                onkeydown={handleKeyDown}
+                oncompositionstart={handleCompositionStart}
+                oncompositionend={handleCompositionEnd}
+                disabled={isLoading}
+            ></textarea>
+
+            <!-- Quick-action chips -->
+            <div class="furu-bar__chips">
+                <template for:each={quickChips} for:item="chip">
+                    <button
+                        key={chip.key}
+                        class="furu-bar__chip"
+                        data-cmd={chip.cmd}
+                        onclick={handleChip}
+                        disabled={isLoading}
+                        type="button"
+                    >{chip.label}</button>
+                </template>
+            </div>
+
+            <!-- Attachment badge — shown while OCR is running -->
+            <template lwc:if={_attachedFileName}>
+                <div class="furu-bar__attachment">
+                    <span class="furu-bar__attachment-icon">📎</span>
+                    <span class="furu-bar__attachment-name">{_attachedFileName}</span>
+                    <button class="furu-bar__attachment-dismiss" onclick={dismissAttachment} type="button">✕</button>
+                </div>
+            </template>
+
+            <!-- Footer: camera button + hint + submit -->
+            <div class="furu-bar__footer">
+                <label class="furu-bar__file-btn" title="名刺・書類をアップロード (JPG/PNG/PDF)">
+                    📷
+                    <input
+                        class="furu-bar__file-input"
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/heic,application/pdf,.csv,text/csv"
+                        onchange={handleFileSelect}
+                    />
+                </label>
+                <span class="furu-bar__hint">{i18n.hint}</span>
+                <button
+                    class="furu-bar__submit"
+                    onclick={handleSubmit}
+                    disabled={isLoading}
+                    title="Run (Enter)"
+                >
+                    <template lwc:if={isLoading}>
+                        <div class="furu-bar__spinner"></div>
+                    </template>
+                    <template lwc:else>↑</template>
+                </button>
+            </div>
         </div>
 
-        <!-- ── Status / confirmation bar ────────────────────────── -->
+        <!-- ── Context Panel (ambient idle state) ──────────────────── -->
+        <template lwc:if={showContextPanel}>
+            <div class="furu-bar__ctx-panel">
+
+                <!-- Section A: Field guide -->
+                <template lwc:if={hasContextFields}>
+                    <div class="furu-bar__ctx-section">
+                        <div class="furu-bar__ctx-section-title">
+                            <span>📋</span>
+                            <span>{contextSectionTitle}</span>
+                        </div>
+                        <template for:each={contextFieldRows} for:item="f">
+                            <div key={f.apiName} class="furu-bar__ctx-field">
+                                <div class="furu-bar__ctx-field-top">
+                                    <span class="furu-bar__ctx-field-icon">{f.statusIcon}</span>
+                                    <span class="furu-bar__ctx-field-label">{f.label}</span>
+                                    <template lwc:if={f.isRequired}>
+                                        <span class="furu-bar__ctx-field-badge furu-bar__ctx-field-badge--req">{i18n.required}</span>
+                                    </template>
+                                    <template lwc:else>
+                                        <span class="furu-bar__ctx-field-badge furu-bar__ctx-field-badge--opt">{i18n.optional}</span>
+                                    </template>
+                                    <template lwc:if={f.limitBadge}>
+                                        <span class="furu-bar__ctx-field-badge furu-bar__ctx-field-badge--limit">{f.limitBadge}</span>
+                                    </template>
+                                </div>
+                                <template lwc:if={f.exampleHint}>
+                                    <p class="furu-bar__ctx-field-example">{f.exampleHint}</p>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+                <!-- Section B: Active semantic rules -->
+                <template lwc:if={hasContextRules}>
+                    <div class="furu-bar__ctx-section furu-bar__ctx-section--rules">
+                        <div class="furu-bar__ctx-section-title">
+                            <span>💡</span>
+                            <span>{i18n.ctxRulesTitle}</span>
+                        </div>
+                        <template for:each={contextRuleRows} for:item="rule">
+                            <div key={rule.id} class="furu-bar__ctx-rule">
+                                <span class="furu-bar__ctx-rule-bullet">●</span>
+                                <span class="furu-bar__ctx-rule-text">{rule.text}</span>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+            </div>
+        </template>
+
+        <!-- ── Record Summary Card ───────────────────────────────────── -->
+        <template lwc:if={hasSummaryCard}>
+            <div class="furu-bar__summary">
+                <div class="furu-bar__summary-header">
+                    <span class="furu-bar__summary-icon">📊</span>
+                    <span class="furu-bar__summary-title">{summaryTitle}</span>
+                    <button class="furu-bar__summary-edit-btn"
+                            onclick={handleEditSummary}
+                            title="Edit summary fields"
+                            type="button">✏️</button>
+                </div>
+
+                <!-- Read mode — field values -->
+                <template lwc:unless={_summaryEditing}>
+                    <div class="furu-bar__summary-fields">
+                        <template for:each={summaryFieldRows} for:item="f">
+                            <div key={f.apiName} class={f.cssClass}>
+                                <span class="furu-bar__summary-label">{f.label}</span>
+                                <template lwc:if={f.isRequired}>
+                                    <span class="furu-bar__summary-req">必須</span>
+                                </template>
+                                <span class="furu-bar__summary-value">{f.displayValue}</span>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+                <!-- Edit mode — field selector -->
+                <template lwc:if={_summaryEditing}>
+                    <div class="furu-bar__summary-editor">
+                        <template for:each={_summaryAllFields} for:item="f">
+                            <label key={f.apiName} class="furu-bar__summary-check-row">
+                                <input type="checkbox"
+                                       checked={f.isChecked}
+                                       data-apiname={f.apiName}
+                                       onchange={handleSummaryFieldToggle} />
+                                <span class="furu-bar__summary-check-label">{f.label}</span>
+                                <template lwc:if={f.isRequired}>
+                                    <span class="furu-bar__summary-req">必須</span>
+                                </template>
+                            </label>
+                        </template>
+                    </div>
+                    <div class="furu-bar__summary-edit-actions">
+                        <button class="furu-bar__action-btn furu-bar__action-btn--save"
+                                onclick={handleSummarySave}
+                                disabled={_savingSummary}
+                                type="button">
+                            <template lwc:if={_savingSummary}>
+                                <div class="furu-bar__spinner"></div>
+                            </template>
+                            <template lwc:else>{summaryEditSaveLabel}</template>
+                        </button>
+                        <button class="furu-bar__action-btn"
+                                onclick={handleEditSummary}
+                                type="button">{i18n.cancel}</button>
+                    </div>
+                </template>
+            </div>
+        </template>
+
+        <!-- ── Personal Search Shortcuts (idle state) ───────────────── -->
+        <template lwc:if={showShortcuts}>
+            <div class="furu-bar__shortcuts">
+                <div class="furu-bar__shortcuts-label">
+                    <span>⭐</span>
+                    <span>{soqlShortcutsLabel}</span>
+                </div>
+                <div class="furu-bar__shortcuts-chips">
+                    <template for:each={shortcutChips} for:item="q">
+                        <span key={q.idx} class="furu-bar__shortcut-chip">
+                            <button class="furu-bar__shortcut-run"
+                                    data-idx={q.idx}
+                                    onclick={handleShortcutChip}
+                                    type="button">⚡ {q.name}</button>
+                            <button class="furu-bar__shortcut-del"
+                                    data-idx={q.idx}
+                                    onclick={handleDeleteShortcut}
+                                    type="button">✕</button>
+                        </span>
+                    </template>
+                </div>
+            </div>
+        </template>
+
+        <!-- ── Status bar ────────────────────────────────────────────── -->
         <template lwc:if={statusMessage}>
             <div class={statusClass}>
                 <span class="furu-bar__status-icon">{statusIcon}</span>
                 <span class="furu-bar__status-text">{statusMessage}</span>
                 <template lwc:if={showUndo}>
-                    <button class="furu-bar__undo" onclick={handleUndo}>Undo</button>
+                    <button class="furu-bar__pill-btn" onclick={handleUndo}>{i18n.undo}</button>
                 </template>
-                <button class="furu-bar__dismiss" onclick={dismissStatus}>✕</button>
+                <button class="furu-bar__pill-btn furu-bar__pill-btn--muted" onclick={dismissStatus}>✕</button>
             </div>
         </template>
 
-        <!-- ── Search results ────────────────────────────────────── -->
+        <!-- ── Search results ─────────────────────────────────────────── -->
         <template lwc:if={hasResults}>
             <div class="furu-bar__results">
                 <div class="furu-bar__results-header">
-                    <span>{resultCount} result(s) — click to navigate</span>
-                    <button class="furu-bar__dismiss" onclick={dismissResults}>✕</button>
+                    <span>{resultCount} {i18n.results}</span>
+                    <button class="furu-bar__pill-btn furu-bar__pill-btn--muted" onclick={dismissResults}>✕</button>
                 </div>
                 <ul class="furu-bar__result-list">
                     <template for:each={searchResults} for:item="row">
-                        <li key={row.Id} class="furu-bar__result-row" onclick={handleResultClick} data-id={row.Id} data-type={row.type}>
+                        <li key={row.Id} class="furu-bar__result-row"
+                            onclick={handleResultClick}
+                            data-id={row.Id}
+                            data-type={row.type}>
                             <span class="furu-bar__result-type">{row.type}</span>
                             <span class="furu-bar__result-name">{row.Name}</span>
                             <span class="furu-bar__result-sub">{row.sub}</span>
@@ -64,13 +277,529 @@
             </div>
         </template>
 
-        <!-- ── Pre-fill confirmation ──────────────────────────────── -->
+        <!-- ── Pre-fill / Extract Review Card ───────────────────────── -->
         <template lwc:if={hasPrefill}>
             <div class="furu-bar__prefill">
-                <span class="furu-bar__status-icon">✏️</span>
-                <span class="furu-bar__status-text">{prefillSummary}</span>
-                <button class="furu-bar__action-btn furu-bar__action-btn--save" onclick={handleSavePrefill}>Save</button>
-                <button class="furu-bar__action-btn" onclick={dismissPrefill}>Discard</button>
+                <div class="furu-bar__prefill-header">
+                    <span class="furu-bar__prefill-title">{prefillTitle}</span>
+                    <button class="furu-bar__pill-btn furu-bar__pill-btn--muted" onclick={dismissPrefill}>✕</button>
+                </div>
+                <ul class="furu-bar__prefill-rows">
+                    <template for:each={prefillItems} for:item="item">
+                        <li key={item.apiName} class="furu-bar__prefill-row">
+                            <span class="furu-bar__prefill-field">{item.apiName}</span>
+                            <span class="furu-bar__prefill-arrow">→</span>
+                            <span class="furu-bar__prefill-value">{item.displayValue}</span>
+                        </li>
+                    </template>
+                </ul>
+                <div class="furu-bar__prefill-actions">
+                    <button class="furu-bar__action-btn furu-bar__action-btn--save" onclick={handleSavePrefill}>{i18n.save}</button>
+                    <button class="furu-bar__action-btn" onclick={dismissPrefill}>{i18n.discard}</button>
+                </div>
+            </div>
+        </template>
+
+        <!-- ── Knowledge Alert (learned validation rules) ───────────── -->
+        <template lwc:if={hasKnowledgeAlert}>
+            <div class="furu-bar__knowledge-alert">
+                <div class="furu-bar__knowledge-header">
+                    <span class="furu-bar__knowledge-title">{i18n.knowledgeTitle}</span>
+                    <button class="furu-bar__pill-btn furu-bar__pill-btn--muted" onclick={dismissKnowledgeAlert}>✕</button>
+                </div>
+                <template for:each={knowledgeWarnings} for:item="w">
+                    <p key={w} class="furu-bar__knowledge-rule">{w}</p>
+                </template>
+                <div class="furu-bar__knowledge-actions">
+                    <button class="furu-bar__action-btn furu-bar__action-btn--save" onclick={handleKnowledgeProceed}>{i18n.proceed}</button>
+                    <button class="furu-bar__action-btn" onclick={dismissKnowledgeAlert}>{i18n.cancel}</button>
+                </div>
+            </div>
+        </template>
+
+        <!-- ── Field Guide (GUIDE_CREATE) ────────────────────────────── -->
+        <template lwc:if={hasGuide}>
+            <div class="furu-bar__guide">
+                <div class="furu-bar__guide-header">
+                    <span class="furu-bar__guide-title">📋 {guideName}</span>
+                    <button class="furu-bar__pill-btn furu-bar__pill-btn--muted" onclick={dismissGuide}>✕</button>
+                </div>
+                <!-- Parent-record resolver (auto-bind or search) -->
+                <template lwc:if={hasParentState}>
+                    <div class="furu-bar__parent-resolver">
+                        <div class="furu-bar__parent-row">
+                            <span class="furu-bar__parent-row-label">{parentStateLabel}</span>
+                            <template lwc:if={parentSelectedName}>
+                                <span class="furu-bar__parent-chip">
+                                    🏢 {parentSelectedName}
+                                    <template lwc:unless={parentAutobound}>
+                                        <button class="furu-bar__parent-clear" onclick={handleClearParent} type="button">✕</button>
+                                    </template>
+                                </span>
+                                <template lwc:if={parentAutobound}>
+                                    <button class="furu-bar__parent-change-btn" onclick={handleClearParent} type="button">変更</button>
+                                </template>
+                            </template>
+                            <template lwc:else>
+                                <span class="furu-bar__parent-unset">未選択</span>
+                            </template>
+                        </div>
+                        <!-- Candidates from SOSL search -->
+                        <template lwc:if={hasParentCandidates}>
+                            <div class="furu-bar__parent-candidates">
+                                <template for:each={parentCandidates} for:item="cand">
+                                    <button
+                                        key={cand.id}
+                                        class="furu-bar__parent-cand-btn"
+                                        data-id={cand.id}
+                                        data-name={cand.name}
+                                        onclick={handleSelectParent}
+                                        type="button"
+                                    >🏢 {cand.name}<template lwc:if={cand.sub}><span class="furu-bar__parent-cand-sub"> · {cand.sub}</span></template></button>
+                                </template>
+                            </div>
+                        </template>
+                        <!-- Search input (shown when no parent selected) -->
+                        <template lwc:unless={parentSelectedName}>
+                            <div class="furu-bar__parent-search">
+                                <input
+                                    class="furu-bar__parent-search-input"
+                                    type="text"
+                                    placeholder={parentSearchPlaceholder}
+                                    value={parentSearchText}
+                                    oninput={handleParentSearchInput}
+                                    onkeydown={handleParentSearchKeydown}
+                                />
+                                <button class="furu-bar__parent-search-btn" onclick={handleParentSearch} disabled={isParentSearching} type="button">
+                                    <template lwc:if={isParentSearching}><div class="furu-bar__spinner"></div></template>
+                                    <template lwc:else>🔍</template>
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+                <ul class="furu-bar__guide-list">
+                    <template for:each={guideFields} for:item="fi">
+                        <li key={fi.apiName} class="furu-bar__guide-row">
+                            <div class="furu-bar__guide-row-top">
+                                <span class="furu-bar__guide-icon">{fi.statusIcon}</span>
+                                <span class="furu-bar__guide-label">{fi.label}</span>
+                                <template lwc:if={fi.isRequired}>
+                                    <span class="furu-bar__guide-badge furu-bar__guide-badge--req">{i18n.required}</span>
+                                </template>
+                                <template lwc:else>
+                                    <template lwc:unless={fi.isCalculated}>
+                                        <span class="furu-bar__guide-badge furu-bar__guide-badge--opt">{i18n.optional}</span>
+                                    </template>
+                                </template>
+                                <template lwc:if={fi.isCalculated}>
+                                    <span class="furu-bar__guide-badge furu-bar__guide-badge--formula">{i18n.formula}</span>
+                                </template>
+                                <template lwc:if={fi.limitBadge}>
+                                    <span class="furu-bar__guide-badge furu-bar__guide-badge--limit">{fi.limitBadge}</span>
+                                </template>
+                            </div>
+                            <template lwc:if={fi.exampleHint}>
+                                <p class="furu-bar__guide-example">{fi.exampleHint}</p>
+                            </template>
+                        </li>
+                    </template>
+                </ul>
+                <p class="furu-bar__guide-hint">{i18n.guideHint}</p>
+            </div>
+        </template>
+
+        <!-- ── Japanese Address Review Card ─────────────────────────── -->
+        <template lwc:if={hasAddressCard}>
+            <div class="furu-bar__address">
+                <div class="furu-bar__address-header">
+                    <span class="furu-bar__address-title">〒 住所確認</span>
+                    <button class="furu-bar__pill-btn furu-bar__pill-btn--muted" onclick={dismissAddressCard}>✕</button>
+                </div>
+                <ul class="furu-bar__address-rows">
+                    <template for:each={addressRows} for:item="row">
+                        <li key={row.key} class="furu-bar__address-row">
+                            <span class="furu-bar__address-label">{row.label}</span>
+                            <span class="furu-bar__address-value">{row.value}</span>
+                        </li>
+                    </template>
+                </ul>
+                <div class="furu-bar__address-actions">
+                    <button class="furu-bar__action-btn furu-bar__action-btn--save" onclick={handleAddressConfirm}>確定して適用</button>
+                    <button class="furu-bar__action-btn" onclick={dismissAddressCard}>キャンセル</button>
+                </div>
+            </div>
+        </template>
+
+        <!-- ── SOQL Smart Search Results ───────────────────────────────── -->
+        <template lwc:if={hasSoqlResults}>
+            <div class="furu-bar__soql">
+
+                <!-- Header -->
+                <div class="furu-bar__soql-header">
+                    <span class="furu-bar__soql-icon">🔍</span>
+                    <div class="furu-bar__soql-summary-block">
+                        <span class="furu-bar__soql-summary">{soqlSummary}</span>
+                        <span class="furu-bar__soql-count">{soqlRecordCount}件
+                            <template lwc:if={soqlTotalAmountLabel}>
+                                <span class="furu-bar__soql-total">({soqlTotalAmountLabel})</span>
+                            </template>
+                        </span>
+                    </div>
+                    <!-- View mode toggle -->
+                    <div class="furu-bar__soql-view-toggle">
+                        <button class="furu-bar__soql-view-btn"
+                                data-active={soqlIsCardMode}
+                                onclick={handleViewModeCard} type="button">🎴</button>
+                        <button class="furu-bar__soql-view-btn"
+                                data-active={soqlIsTableMode}
+                                onclick={handleViewModeTable} type="button">📊</button>
+                    </div>
+                    <!-- Save shortcut -->
+                    <button class="furu-bar__soql-save-btn"
+                            onclick={handleSoqlSave}
+                            disabled={soqlIsLoading}
+                            title={soqlSaveBtnTitle}
+                            type="button">⭐</button>
+                    <button class="furu-bar__soql-export-btn"
+                            onclick={handleSoqlExport}
+                            disabled={soqlIsLoading}
+                            type="button">
+                        📥 CSV
+                    </button>
+                    <button class="furu-bar__pill-btn furu-bar__pill-btn--muted"
+                            onclick={dismissSoqlResults} type="button">✕</button>
+                </div>
+                <!-- Pop-out hint when narrow + many fields -->
+                <template lwc:if={soqlWideHint}>
+                    <div class="furu-bar__soql-wide-hint">
+                        💡 右上 ↗ でポップアウトするとテーブル表示に切り替わります
+                    </div>
+                </template>
+
+                <!-- Active field badges -->
+                <div class="furu-bar__soql-fields">
+                    <span class="furu-bar__soql-fields-label">📌</span>
+                    <template for:each={soqlFieldBadges} for:item="f">
+                        <span key={f.idx} class="furu-bar__soql-field-badge">
+                            {f.label}
+                            <button class="furu-bar__soql-field-rm"
+                                    data-api={f.apiName}
+                                    onclick={handleRemoveSoqlField}
+                                    type="button">✕</button>
+                        </span>
+                    </template>
+                </div>
+
+                <!-- Loading overlay -->
+                <template lwc:if={soqlIsLoading}>
+                    <div class="furu-bar__soql-loading">
+                        <div class="furu-bar__spinner"></div>
+                    </div>
+                </template>
+
+                <!-- Card view -->
+                <template lwc:if={soqlIsCardMode}>
+                    <template lwc:if={soqlResultCards.length}>
+                        <ul class="furu-bar__soql-list">
+                            <template for:each={soqlResultCards} for:item="card">
+                                <li key={card.key} class="furu-bar__soql-card">
+                                    <div class="furu-bar__soql-card-top">
+                                        <span class="furu-bar__soql-card-name">
+                                            <template lwc:if={card.isInactive}>⚠️ </template>
+                                            {card.name}
+                                        </span>
+                                    </div>
+                                    <template for:each={card.fieldRows} for:item="fr">
+                                        <div key={fr.key} class="furu-bar__soql-field-row">
+                                            <span class="furu-bar__soql-field-lbl">{fr.label}</span>
+                                            <span class="furu-bar__soql-field-val">{fr.value}</span>
+                                        </div>
+                                    </template>
+                                    <div class="furu-bar__soql-card-actions">
+                                        <button class="furu-bar__soql-act-btn"
+                                                data-cmd={card.injectCmd}
+                                                onclick={handleSoqlCommandInject}
+                                                type="button">📝 コマンド</button>
+                                        <button class="furu-bar__soql-act-btn furu-bar__soql-act-btn--nav"
+                                                data-id={card.id}
+                                                onclick={handleSoqlRecordNavigate}
+                                                type="button">↗ 開く</button>
+                                    </div>
+                                </li>
+                            </template>
+                        </ul>
+                    </template>
+                </template>
+
+                <!-- Table view (shown when viewMode='table' or wide pop-out) -->
+                <template lwc:if={soqlIsTableMode}>
+                    <template lwc:if={soqlTableRows.length}>
+                        <div class="furu-bar__soql-table-wrap">
+                            <table class="furu-bar__soql-table">
+                                <thead>
+                                    <tr>
+                                        <th class="furu-bar__soql-th furu-bar__soql-th--sticky">
+                                            {soqlNameColLabel}
+                                        </th>
+                                        <template for:each={soqlTableHeaders} for:item="h">
+                                            <th key={h.key} class="furu-bar__soql-th">{h.label}</th>
+                                        </template>
+                                        <th class="furu-bar__soql-th">—</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template for:each={soqlTableRows} for:item="row">
+                                        <tr key={row.key} class="furu-bar__soql-tr">
+                                            <td class="furu-bar__soql-td furu-bar__soql-td--sticky">
+                                                <template lwc:if={row.isInactive}>⚠️ </template>{row.name}
+                                            </td>
+                                            <template for:each={row.cells} for:item="cell">
+                                                <td key={cell.key} class="furu-bar__soql-td">{cell.value}</td>
+                                            </template>
+                                            <td class="furu-bar__soql-td furu-bar__soql-td--act">
+                                                <button class="furu-bar__soql-act-btn furu-bar__soql-act-btn--nav"
+                                                        data-id={row.id}
+                                                        onclick={handleSoqlRecordNavigate}
+                                                        type="button">↗</button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </template>
+                </template>
+
+            </div>
+        </template>
+
+        <!-- ── CSV Bulk Import Card ──────────────────────────────────── -->
+        <template lwc:if={hasCsvImport}>
+            <div class="furu-bar__csv">
+
+                <!-- Header -->
+                <div class="furu-bar__csv-header">
+                    <span class="furu-bar__csv-icon">📁</span>
+                    <div class="furu-bar__csv-title-block">
+                        <span class="furu-bar__csv-title">{csvFileName}</span>
+                        <span class="furu-bar__csv-count">{csvTotalRows}件</span>
+                    </div>
+                    <button class="furu-bar__pill-btn furu-bar__pill-btn--muted" onclick={dismissCsvImport} type="button">✕</button>
+                </div>
+
+                <!-- Mapping phase: spinner -->
+                <template lwc:if={csvIsMappingPhase}>
+                    <div class="furu-bar__csv-spinner-row">
+                        <div class="furu-bar__spinner"></div>
+                        <span>列を解析中...</span>
+                    </div>
+                </template>
+
+                <!-- Preview phase: mapping table -->
+                <template lwc:if={csvIsPreviewPhase}>
+                    <div class="furu-bar__csv-map-header">
+                        <span>🤖 AIスマートマッピング</span>
+                        <template lwc:if={csvHasUnmapped}>
+                            <span class="furu-bar__csv-warn-badge">⚠️ {csvUnmappedCount}列 未マッピング</span>
+                        </template>
+                    </div>
+                    <ul class="furu-bar__csv-map-list">
+                        <template for:each={csvMappingRows} for:item="m">
+                            <li key={m.idx} class="furu-bar__csv-map-row">
+                                <span class="furu-bar__csv-map-src">{m.csvHeader}</span>
+                                <span class="furu-bar__csv-map-arrow">➔</span>
+                                <span class={m.sfClass}>{m.displaySf}</span>
+                                <template lwc:if={m.transformLabel}>
+                                    <span class="furu-bar__csv-map-tf">{m.transformLabel}</span>
+                                </template>
+                            </li>
+                        </template>
+                    </ul>
+                    <div class="furu-bar__csv-actions">
+                        <button class="furu-bar__action-btn furu-bar__action-btn--save" onclick={handleCsvImport} type="button">
+                            🚀 {csvTotalRows}件を一括インポート
+                        </button>
+                        <button class="furu-bar__action-btn" onclick={dismissCsvImport} type="button">キャンセル</button>
+                    </div>
+                </template>
+
+                <!-- Importing phase: progress -->
+                <template lwc:if={csvIsImportingPhase}>
+                    <div class="furu-bar__csv-spinner-row">
+                        <div class="furu-bar__spinner"></div>
+                        <span>{csvProgressLabel}</span>
+                    </div>
+                    <div class="furu-bar__csv-progress-bar">
+                        <div class="furu-bar__csv-progress-fill" style={csvProgressStyle}></div>
+                    </div>
+                </template>
+
+                <!-- Done phase: result -->
+                <template lwc:if={csvIsDonePhase}>
+                    <div class="furu-bar__csv-result">
+                        <span class="furu-bar__csv-result-ok">✅ {csvInserted}件 登録完了</span>
+                        <template lwc:if={csvFailed}>
+                            <span class="furu-bar__csv-result-err">⚠️ {csvFailed}件 エラー</span>
+                        </template>
+                    </div>
+                    <template lwc:if={csvErrors.length}>
+                        <ul class="furu-bar__csv-errors">
+                            <template for:each={csvErrors} for:item="e">
+                                <li key={e.row} class="furu-bar__csv-error-row">
+                                    <span class="furu-bar__csv-error-row-num">行{e.row}</span>
+                                    <span class="furu-bar__csv-error-msg">{e.message}</span>
+                                </li>
+                            </template>
+                        </ul>
+                    </template>
+                    <div class="furu-bar__csv-actions">
+                        <template lwc:if={_csvDownloadHref}>
+                            <a  class="furu-bar__action-btn furu-bar__action-btn--save"
+                                href={_csvDownloadHref}
+                                download={csvDownloadFileName}>
+                                📥 結果CSVをダウンロード
+                            </a>
+                        </template>
+                        <button class="furu-bar__action-btn" onclick={dismissCsvImport} type="button">閉じる</button>
+                    </div>
+                </template>
+
+            </div>
+        </template>
+
+        <!-- ── Field Insight (EXPLAIN_FIELD / EXPLAIN_FORMULA) ───────── -->
+        <template lwc:if={hasInsight}>
+            <div class="furu-bar__insight">
+                <div class="furu-bar__insight-header">
+                    <span class="furu-bar__insight-name">{insightCard.label}</span>
+                    <template lwc:if={insightCard.fieldType}>
+                        <span class="furu-bar__insight-type">{insightCard.fieldType}</span>
+                    </template>
+                    <button class="furu-bar__pill-btn furu-bar__pill-btn--muted" onclick={dismissInsight}>✕</button>
+                </div>
+                <template lwc:if={insightCard.helpText}>
+                    <p class="furu-bar__insight-body">{insightCard.helpText}</p>
+                </template>
+                <template lwc:if={insightCard.explanation}>
+                    <p class="furu-bar__insight-formula">{insightCard.explanation}</p>
+                </template>
+                <template lwc:if={insightCard.formulaLiteral}>
+                    <code class="furu-bar__insight-code">{insightCard.formulaLiteral}</code>
+                </template>
+                <template lwc:if={insightCard.message}>
+                    <template lwc:unless={insightCard.helpText}>
+                        <p class="furu-bar__insight-body">{insightCard.message}</p>
+                    </template>
+                </template>
+                <div class="furu-bar__insight-badges">
+                    <template lwc:if={insightCard.isRequired}>
+                        <span class="furu-bar__guide-badge furu-bar__guide-badge--req">{i18n.required}</span>
+                    </template>
+                    <template lwc:if={insightCard.isCalculated}>
+                        <span class="furu-bar__guide-badge furu-bar__guide-badge--formula">{i18n.formula}</span>
+                    </template>
+                </div>
+            </div>
+        </template>
+
+        <!-- ── Admin: Inline Approval Card ──────────────────────────────── -->
+        <template lwc:if={hasPendingApprovals}>
+            <div class="furu-bar__approval">
+                <div class="furu-bar__approval-header">
+                    <span class="furu-bar__approval-icon">💡</span>
+                    <span class="furu-bar__approval-title">管理者向け：新しい入力ルールの承認依頼</span>
+                    <span class="furu-bar__approval-count">{pendingRuleCount}件</span>
+                </div>
+
+                <!-- Edit mode -->
+                <template lwc:if={_editingRuleId}>
+                    <textarea
+                        class="furu-bar__approval-editor"
+                        value={_editingRuleText}
+                        oninput={handleEditRuleInput}
+                        rows="3"
+                    ></textarea>
+                    <div class="furu-bar__approval-actions">
+                        <button class="furu-bar__action-btn furu-bar__action-btn--save" onclick={handleSaveRuleEdit} type="button">✅ 編集して承認</button>
+                        <button class="furu-bar__action-btn" onclick={handleCancelEdit} type="button">キャンセル</button>
+                    </div>
+                </template>
+
+                <!-- View mode -->
+                <template lwc:else>
+                    <p class="furu-bar__approval-rule">{pendingRuleText}</p>
+                    <div class="furu-bar__approval-actions">
+                        <button class="furu-bar__action-btn furu-bar__action-btn--save" onclick={handleApproveRule} type="button">✅ ワンタップ承認</button>
+                        <button class="furu-bar__action-btn furu-bar__action-btn--edit" onclick={handleEditRule} type="button">✏️ 編集</button>
+                        <button class="furu-bar__action-btn" onclick={handleRejectRule} type="button">✕ 拒否</button>
+                    </div>
+                </template>
+            </div>
+        </template>
+
+        <!-- ── Admin: Settings Modal ──────────────────────────────────────── -->
+        <template lwc:if={showSettings}>
+            <div class="furu-bar__modal-backdrop" onclick={closeSettings}></div>
+            <div class="furu-bar__modal">
+                <div class="furu-bar__modal-header">
+                    <span class="furu-bar__modal-title">⚙️ セマンティック辞書（学習ルール一覧）</span>
+                    <button class="furu-bar__pill-btn furu-bar__pill-btn--muted" onclick={closeSettings} type="button">✕</button>
+                </div>
+                <template lwc:if={allRules.length}>
+                    <ul class="furu-bar__modal-list">
+                        <template for:each={allRules} for:item="rule">
+                            <li key={rule.id} class="furu-bar__modal-rule">
+                                <!-- Edit mode inside modal -->
+                                <template lwc:if={_editingRuleId}>
+                                    <template lwc:if={rule.isEditing}>
+                                        <textarea class="furu-bar__approval-editor" value={_editingRuleText} oninput={handleEditRuleInput} rows="2"></textarea>
+                                        <div class="furu-bar__approval-actions">
+                                            <button class="furu-bar__action-btn furu-bar__action-btn--save" onclick={handleSaveModalEdit} type="button">保存</button>
+                                            <button class="furu-bar__action-btn" onclick={handleCancelEdit} type="button">キャンセル</button>
+                                        </div>
+                                    </template>
+                                </template>
+                                <template lwc:else>
+                                    <div class="furu-bar__modal-rule-top">
+                                        <span class="furu-bar__modal-rule-status" data-status={rule.status}>{rule.status}</span>
+                                        <span class="furu-bar__modal-rule-obj">{rule.sObjectType}</span>
+                                        <label class="furu-bar__toggle">
+                                            <input type="checkbox" checked={rule.isEnabled} data-id={rule.id} onchange={handleToggleRule} />
+                                            <span class="furu-bar__toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    <p class="furu-bar__modal-rule-text">{rule.ruleText}</p>
+                                    <div class="furu-bar__modal-rule-meta">
+                                        <span>{rule.createdDate}</span>
+                                        <span>{rule.occurrences}回エラー</span>
+                                        <button class="furu-bar__link-btn" data-id={rule.id} onclick={handleStartEditModal} type="button">✏️ 編集</button>
+                                        <button class="furu-bar__link-btn furu-bar__link-btn--danger" data-id={rule.id} onclick={handleDeleteRule} type="button">🗑️ 削除</button>
+                                    </div>
+                                </template>
+                            </li>
+                        </template>
+                    </ul>
+                </template>
+                <template lwc:else>
+                    <p class="furu-bar__modal-empty">このオブジェクトのルールはまだありません。</p>
+                </template>
+
+                <!-- Schema cache admin section -->
+                <div class="furu-bar__modal-cache">
+                    <div class="furu-bar__modal-cache-title">🗂️ メタデータキャッシュ（24h TTL）</div>
+                    <button class="furu-bar__action-btn furu-bar__action-btn--cache"
+                            onclick={handleRefreshSchemaCache}
+                            disabled={_refreshingCache}
+                            type="button">
+                        <template lwc:if={_refreshingCache}>
+                            <div class="furu-bar__spinner"></div>
+                        </template>
+                        <template lwc:else>🔄 メタデータキャッシュを今すぐ更新</template>
+                    </button>
+                    <p class="furu-bar__modal-cache-hint">{cacheRefreshHint}</p>
+                </div>
             </div>
         </template>
 
