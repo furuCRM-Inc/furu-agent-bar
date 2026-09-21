@@ -14,6 +14,7 @@ import getObjectFieldInsights    from '@salesforce/apex/FuruAgentController.getO
 import getApprovedRules          from '@salesforce/apex/FuruAgentController.getApprovedRules';
 import searchParentRecords       from '@salesforce/apex/FuruAgentController.searchParentRecords';
 import processDocumentViaAgentforce    from '@salesforce/apex/FlashBarOCRController.processDocumentViaAgentforce';
+import importOcrToRecord              from '@salesforce/apex/FlashBarOCRController.importOcrToRecord';
 import { extractPostalCode, extractAddressTail, mapAddressToFields, getCachedAddress, setCachedAddress } from './jpAddressService';
 import { parseCsv, buildRecords, sampleRows } from './csvParser';
 import bulkImportCsv      from '@salesforce/apex/FuruAgentController.bulkImportCsv';
@@ -82,6 +83,36 @@ const PARENT_LOOKUP = {
     Contact:     { field: 'AccountId', parentSObj: 'Account', labelJa: '取引先',       labelEn: 'Account' },
     Case:        { field: 'AccountId', parentSObj: 'Account', labelJa: '取引先',       labelEn: 'Account' },
 };
+
+// Parent sObject → quick child-creation actions (chip label + parent lookup field)
+const CHILD_ACTIONS = {
+    Account: [
+        { sObject: 'Contact',     field: 'AccountId', icon: '👤', labelJa: '担当者を追加',   labelEn: 'Add Contact'  },
+        { sObject: 'Opportunity', field: 'AccountId', icon: '💼', labelJa: '商談を作成',     labelEn: 'Create Deal'  },
+        { sObject: 'Task',        field: 'WhatId',    icon: '📝', labelJa: '活動を記録',     labelEn: 'Log Activity' },
+    ],
+    Contact: [
+        { sObject: 'Opportunity', field: 'ContactId', icon: '💼', labelJa: '商談を作成',     labelEn: 'Create Deal'  },
+        { sObject: 'Task',        field: 'WhoId',     icon: '📝', labelJa: '活動を記録',     labelEn: 'Log Activity' },
+    ],
+    Lead: [
+        { sObject: 'Task',        field: 'WhoId',     icon: '📝', labelJa: '活動を記録',     labelEn: 'Log Activity' },
+    ],
+    Opportunity: [
+        { sObject: 'Task',        field: 'WhatId',    icon: '📝', labelJa: '活動を記録',     labelEn: 'Log Activity' },
+        { sObject: 'Contact',     field: 'AccountId', icon: '👤', labelJa: '担当者をリンク', labelEn: 'Link Contact' },
+    ],
+    Case: [
+        { sObject: 'Task',        field: 'WhatId',    icon: '📝', labelJa: '活動を記録',     labelEn: 'Log Activity' },
+    ],
+};
+
+// OCR target sObject options (shown in review card)
+const OCR_IMPORT_TARGETS = [
+    { sObject: 'Lead',        icon: '🪪', labelJa: 'リード',  labelEn: 'Lead'        },
+    { sObject: 'Opportunity', icon: '💼', labelJa: '商談',    labelEn: 'Opportunity' },
+    { sObject: 'Contact',     icon: '👤', labelJa: '連絡先',  labelEn: 'Contact'     },
+];
 
 const SOBJECT_FROM_URL = () => {
     const parts = window.location.pathname.split('/');
@@ -208,6 +239,8 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     _resizeObs                = null;
     // Schema cache admin
     @track _refreshingCache   = false;
+    // OCR direct import
+    @track _ocrImporting      = false;
     // Record summary card
     @track _summaryResult     = null;   // { fields: [...], isEditable }
     @track _summaryEditing    = false;  // true while showing field-selector UI
@@ -403,6 +436,71 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     }
 
     get summaryEditSaveLabel() { return this.isJa ? '保存' : 'Save'; }
+
+    // ── Child record quick-action chip getters ────────────────────────────────
+
+    get childActionChips() {
+        if (!this._recordId || !this._sObjectType) return [];
+        const hasActiveCard = this.hasPrefill || this.hasGuide || this.hasResults ||
+                              this.hasInsight || this.hasKnowledgeAlert || this.hasAddressCard ||
+                              this.hasPendingApprovals || this.hasCsvImport || this.hasSoqlResults;
+        if (hasActiveCard) return [];
+        return (CHILD_ACTIONS[this._sObjectType] ?? []).map((c, i) => ({
+            ...c,
+            key:   String(i),
+            label: this.isJa ? c.labelJa : c.labelEn,
+        }));
+    }
+
+    get hasChildActions() { return this.childActionChips.length > 0; }
+
+    get childActionsLabel() {
+        const name = this.contextLabel || this._sObjectType || '';
+        return this.isJa
+            ? `💡 ${name} に追加:`
+            : `💡 Add to ${name}:`;
+    }
+
+    // ── OCR review card getters ───────────────────────────────────────────────
+
+    get prefillIsOcr() { return this._prefillAction?.isOcr === true; }
+
+    get prefillDocTypeIcon() {
+        const t = this._prefillAction?.docType ?? '';
+        if (t === 'BUSINESS_CARD') return '🪪';
+        if (t === 'MEETING_NOTE')  return '📝';
+        return '📄';
+    }
+
+    get prefillDocTypeLabel() {
+        const t = this._prefillAction?.docType ?? '';
+        if (t === 'BUSINESS_CARD') return this.isJa ? '名刺' : 'Business Card';
+        if (t === 'MEETING_NOTE')  return this.isJa ? '議事録' : 'Meeting Note';
+        return this.isJa ? '書類' : 'Document';
+    }
+
+    get prefillConfidenceLabel() {
+        const c = this._prefillAction?.confidence ?? 0;
+        const pct = Math.round(c * 100);
+        return this.isJa ? `信頼度 ${pct}%` : `Confidence ${pct}%`;
+    }
+
+    get prefillTargetOptions() {
+        const cur = this._prefillAction?.updateSObject ?? '';
+        return OCR_IMPORT_TARGETS.map(t => ({
+            ...t,
+            label:    this.isJa ? t.labelJa : t.labelEn,
+            cssClass: `furu-bar__ocr-target-chip${t.sObject === cur ? ' furu-bar__ocr-target-chip--active' : ''}`,
+        }));
+    }
+
+    get prefillImportLabel() {
+        const sObj = this._prefillAction?.updateSObject ?? '';
+        const label = this.isJa
+            ? `${SOBJECT_LABELS_JA[sObj] ?? sObj} として保存`
+            : `Save as ${sObj}`;
+        return this._ocrImporting ? '...' : label;
+    }
 
     get cacheRefreshHint() {
         const obj = this._sObjectType ?? (this.isJa ? '現在のオブジェクト' : 'current object');
@@ -1123,15 +1221,36 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
                 return;
             }
 
-            // Route into the Review Card (same flow as text-based EXTRACT)
-            const isCreate = (result.intent ?? 'CREATE_RECORD').includes('CREATE') && !this._recordId;
+            // Resolved target (Agentforce may have detected BUSINESS_CARD → Lead, etc.)
+            const targetSObj   = result.targetSObject ?? this._sObjectType ?? 'Lead';
+            const isUpdate     = !!(this._recordId) && targetSObj === this._sObjectType;
+            const updateId     = isUpdate ? this._recordId : null;
+
+            // Auto-bind parent if creating a child on a matching parent page
+            // e.g. meeting note dropped on Account page → Opportunity inherits AccountId
+            const childCfg = (CHILD_ACTIONS[this._sObjectType] ?? []).find(c => c.sObject === targetSObj);
+            if (childCfg && this._recordId && !isUpdate) {
+                this._parentState = {
+                    field:          childCfg.field,
+                    parentSObj:     this._sObjectType,
+                    labelJa:        SOBJECT_LABELS_JA[this._sObjectType] ?? this._sObjectType,
+                    labelEn:        this._sObjectType,
+                    selectedParent: { id: this._recordId, name: this.contextLabel },
+                    candidates: [], isSearching: false, autobound: true, searchText: '',
+                };
+            }
+
             this._doPrefill({
-                intent:          'EXTRACT_AND_PREFILL',
+                intent:         'EXTRACT_AND_PREFILL',
+                isOcr:          true,
+                docType:        result.docType  ?? 'OTHER',
+                confidence:     result.confidence ?? 0,
                 fields,
-                updateSObject:   this._sObjectType ?? 'Lead',
-                updateRecordId:  this._recordId   ?? null,
-                shouldSave:      !isCreate,   // create = user confirms; update = direct save allowed
-                message:         `${Object.keys(fields).length} 件のフィールドを抽出しました (Confidence: ${Math.round((result.confidence ?? 0) * 100)}%)`,
+                updateSObject:  targetSObj,
+                updateRecordId: updateId,
+                message:        this.isJa
+                    ? `${Object.keys(fields).length} 件のフィールドを抽出しました（信頼度 ${Math.round((result.confidence ?? 0) * 100)}%）`
+                    : `${Object.keys(fields).length} fields extracted (confidence ${Math.round((result.confidence ?? 0) * 100)}%)`,
             });
             this._attachedFileName = null;
         } catch (err) {
@@ -1612,9 +1731,62 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
 
     async handleSavePrefill() {
         if (!this._prefillAction) return;
-        await this._doUpdate({ ...this._prefillAction, intent: 'UPDATE_RECORD' });
+        const action = this._prefillAction;
+        if (action.updateRecordId) {
+            await this._doUpdate({ ...action, intent: 'UPDATE_RECORD' });
+        } else {
+            await this._doCreate(action);
+        }
         this._prefillAction = null;
         publish(this._msgCtx, FuruAgentMessage, { action: 'CLEAR', sObjectType: '', recordId: '', fields: '' });
+    }
+
+    async _doCreate(action) {
+        const sObj   = action.updateSObject ?? 'Lead';
+        const fields = action.fields ?? {};
+        this._ocrImporting = true;
+        try {
+            const newId = await importOcrToRecord({
+                sObjectApiName: sObj,
+                fieldsJson:     JSON.stringify(fields),
+                recordId:       '',
+            });
+            const label = this.isJa
+                ? `✅ ${SOBJECT_LABELS_JA[sObj] ?? sObj} を作成しました`
+                : `✅ ${sObj} created`;
+            this._setStatus(label, 'success');
+            this[NavigationMixin.Navigate]({
+                type:       'standard__recordPage',
+                attributes: { recordId: newId, actionName: 'view' },
+            });
+        } catch (err) {
+            this._setStatus('Import failed: ' + (err.body?.message ?? err.message), 'error');
+        } finally {
+            this._ocrImporting = false;
+        }
+    }
+
+    handleOcrTargetSwitch(e) {
+        const sObj = e.currentTarget.dataset.sobject;
+        if (!sObj || !this._prefillAction) return;
+        this._prefillAction = { ...this._prefillAction, updateSObject: sObj, updateRecordId: null };
+    }
+
+    handleChildActionChip(e) {
+        const sObject = e.currentTarget.dataset.sobject;
+        const field   = e.currentTarget.dataset.field;
+        if (!sObject) return;
+        this._doGuide({ guideSObject: sObject });
+        if (field && this._recordId) {
+            this._parentState = {
+                field:          field,
+                parentSObj:     this._sObjectType,
+                labelJa:        SOBJECT_LABELS_JA[this._sObjectType] ?? this._sObjectType,
+                labelEn:        this._sObjectType,
+                selectedParent: { id: this._recordId, name: this.contextLabel },
+                candidates: [], isSearching: false, autobound: true, searchText: '',
+            };
+        }
     }
 
     dismissPrefill() {

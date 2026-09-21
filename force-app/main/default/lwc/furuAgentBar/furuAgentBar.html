@@ -158,6 +158,23 @@
             </div>
         </template>
 
+        <!-- ── Child Record Quick-Action Chips ──────────────────────── -->
+        <template lwc:if={hasChildActions}>
+            <div class="furu-bar__child-actions">
+                <span class="furu-bar__child-actions-label">{childActionsLabel}</span>
+                <div class="furu-bar__child-actions-chips">
+                    <template for:each={childActionChips} for:item="chip">
+                        <button key={chip.key}
+                                class="furu-bar__child-action-chip"
+                                data-sobject={chip.sObject}
+                                data-field={chip.field}
+                                onclick={handleChildActionChip}
+                                type="button">{chip.icon} {chip.label}</button>
+                    </template>
+                </div>
+            </div>
+        </template>
+
         <!-- ── Record Summary Card ───────────────────────────────────── -->
         <template lwc:if={hasSummaryCard}>
             <div class="furu-bar__summary">
@@ -277,13 +294,31 @@
             </div>
         </template>
 
-        <!-- ── Pre-fill / Extract Review Card ───────────────────────── -->
+        <!-- ── Pre-fill / Extract / OCR Review Card ─────────────────── -->
         <template lwc:if={hasPrefill}>
             <div class="furu-bar__prefill">
                 <div class="furu-bar__prefill-header">
                     <span class="furu-bar__prefill-title">{prefillTitle}</span>
                     <button class="furu-bar__pill-btn furu-bar__pill-btn--muted" onclick={dismissPrefill}>✕</button>
                 </div>
+
+                <!-- OCR metadata row (doc type + confidence + target switcher) -->
+                <template lwc:if={prefillIsOcr}>
+                    <div class="furu-bar__ocr-meta">
+                        <span class="furu-bar__ocr-doctype">{prefillDocTypeIcon} {prefillDocTypeLabel}</span>
+                        <span class="furu-bar__ocr-confidence">{prefillConfidenceLabel}</span>
+                    </div>
+                    <div class="furu-bar__ocr-targets">
+                        <template for:each={prefillTargetOptions} for:item="opt">
+                            <button key={opt.sObject}
+                                    class={opt.cssClass}
+                                    data-sobject={opt.sObject}
+                                    onclick={handleOcrTargetSwitch}
+                                    type="button">{opt.icon} {opt.label}</button>
+                        </template>
+                    </div>
+                </template>
+
                 <ul class="furu-bar__prefill-rows">
                     <template for:each={prefillItems} for:item="item">
                         <li key={item.apiName} class="furu-bar__prefill-row">
@@ -294,7 +329,20 @@
                     </template>
                 </ul>
                 <div class="furu-bar__prefill-actions">
-                    <button class="furu-bar__action-btn furu-bar__action-btn--save" onclick={handleSavePrefill}>{i18n.save}</button>
+                    <!-- OCR: labeled import button -->
+                    <template lwc:if={prefillIsOcr}>
+                        <button class="furu-bar__action-btn furu-bar__action-btn--save"
+                                onclick={handleSavePrefill}
+                                disabled={_ocrImporting}
+                                type="button">
+                            <template lwc:if={_ocrImporting}><div class="furu-bar__spinner"></div></template>
+                            <template lwc:else>{prefillImportLabel}</template>
+                        </button>
+                    </template>
+                    <!-- Standard prefill save -->
+                    <template lwc:unless={prefillIsOcr}>
+                        <button class="furu-bar__action-btn furu-bar__action-btn--save" onclick={handleSavePrefill}>{i18n.save}</button>
+                    </template>
                     <button class="furu-bar__action-btn" onclick={dismissPrefill}>{i18n.discard}</button>
                 </div>
             </div>

@@ -2055,6 +2055,90 @@
     line-height: 1.5;
 }
 
+/* ── Child record quick-action chips ────────────────────────────────────── */
+.furu-bar__child-actions {
+    margin:        4px 8px;
+    padding:       8px 10px;
+    background:    rgba(15,23,42,0.55);
+    border:        1px solid rgba(99,102,241,0.2);
+    border-radius: var(--radius-md);
+}
+
+.furu-bar__child-actions-label {
+    display:     block;
+    font-size:   10px;
+    color:       var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.furu-bar__child-actions-chips {
+    display:   flex;
+    flex-wrap: wrap;
+    gap:       5px;
+}
+
+.furu-bar__child-action-chip {
+    font-size:     11px;
+    padding:       4px 10px;
+    border-radius: 12px;
+    border:        1px solid rgba(99,102,241,0.35);
+    background:    rgba(99,102,241,0.1);
+    color:         #a5b4fc;
+    cursor:        pointer;
+    transition:    background var(--transition-fast), border-color var(--transition-fast);
+    white-space:   nowrap;
+}
+.furu-bar__child-action-chip:hover {
+    background:   rgba(99,102,241,0.22);
+    border-color: rgba(99,102,241,0.6);
+}
+
+/* ── OCR review card meta row ────────────────────────────────────────────── */
+.furu-bar__ocr-meta {
+    display:       flex;
+    align-items:   center;
+    gap:           8px;
+    margin-bottom: 6px;
+    font-size:     10px;
+}
+
+.furu-bar__ocr-doctype {
+    font-weight: 600;
+    color:       #c4b5fd;
+    padding:     2px 7px;
+    border-radius: 8px;
+    background:  rgba(196,181,253,0.12);
+}
+
+.furu-bar__ocr-confidence {
+    color: var(--text-secondary);
+}
+
+.furu-bar__ocr-targets {
+    display:       flex;
+    flex-wrap:     wrap;
+    gap:           5px;
+    margin-bottom: 8px;
+}
+
+.furu-bar__ocr-target-chip {
+    font-size:     11px;
+    padding:       3px 9px;
+    border-radius: 10px;
+    border:        1px solid rgba(63,63,70,0.6);
+    background:    rgba(30,30,40,0.5);
+    color:         var(--text-secondary);
+    cursor:        pointer;
+    transition:    all var(--transition-fast);
+}
+.furu-bar__ocr-target-chip:hover  { border-color: rgba(99,102,241,0.5); color: #a5b4fc; }
+.furu-bar__ocr-target-chip--active {
+    border-color: rgba(99,102,241,0.7);
+    background:   rgba(99,102,241,0.18);
+    color:        #a5b4fc;
+    font-weight:  600;
+}
+
 /* ── Record Summary Card ─────────────────────────────────────────────────── */
 .furu-bar__summary {
     margin:        4px 8px;
