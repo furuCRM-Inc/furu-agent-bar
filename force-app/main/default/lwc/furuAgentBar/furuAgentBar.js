@@ -20,9 +20,14 @@ import { parseCsv, buildRecords, sampleRows } from './csvParser';
 import bulkImportCsv      from '@salesforce/apex/FuruAgentController.bulkImportCsv';
 import executeSoqlQuery   from '@salesforce/apex/FuruAgentController.executeSoqlQuery';
 import refreshSchemaCache    from '@salesforce/apex/FlashBarSchemaCacheService.refreshSchemaCache';
+import saveClaudeApiKey        from '@salesforce/apex/FlashBarDashboardController.saveClaudeApiKey';
+import checkClaudeStatus      from '@salesforce/apex/FlashBarDashboardController.checkClaudeStatus';
+import disconnectClaude       from '@salesforce/apex/FlashBarDashboardController.disconnectClaude';
+import createAnalytics        from '@salesforce/apex/FlashBarDashboardController.createAnalytics';
 import getRecordSummary     from '@salesforce/apex/FlashBarSummaryService.getRecordSummary';
 import getCandidateFields   from '@salesforce/apex/FlashBarSummaryService.getCandidateFields';
 import updateSummaryFields  from '@salesforce/apex/FlashBarSummaryService.updateSummaryFields';
+import getRecentRecords from '@salesforce/apex/FlashBarRecentService.getRecentRecords';
 import getAdminContext  from '@salesforce/apex/FlashBarAdminController.getAdminContext';
 import getPendingRules  from '@salesforce/apex/FlashBarAdminController.getPendingRules';
 import getAllRules       from '@salesforce/apex/FlashBarAdminController.getAllRules';
@@ -31,6 +36,15 @@ import rejectRule       from '@salesforce/apex/FlashBarAdminController.rejectRul
 import toggleRule       from '@salesforce/apex/FlashBarAdminController.toggleRule';
 import deleteRule       from '@salesforce/apex/FlashBarAdminController.deleteRule';
 import updateRuleText   from '@salesforce/apex/FlashBarAdminController.updateRuleText';
+import getEditSchema        from '@salesforce/apex/FlashBarMassEditService.getEditSchema';
+import updateMassiveRecords from '@salesforce/apex/FlashBarMassEditService.updateMassiveRecords';
+import executeJevIntent          from '@salesforce/apex/FlashBarAgentforceRuntime.executeJevIntent';
+import getSchemaForWorkerKv      from '@salesforce/apex/FlashBarAgentforceRuntime.getSchemaForWorkerKv';
+import getCustomSObjectsForKv    from '@salesforce/apex/FlashBarAgentforceRuntime.getCustomSObjectsForKv';
+import getUserNavItems      from '@salesforce/apex/FlashBarNavigationController.getUserNavItems';
+import pinQuery             from '@salesforce/apex/FlashBarNavigationController.pinQuery';
+import pinPage              from '@salesforce/apex/FlashBarNavigationController.pinPage';
+import deleteNavItem        from '@salesforce/apex/FlashBarNavigationController.deleteNavItem';
 
 const TEXTAREA_MAX_H = 160;
 
@@ -193,9 +207,17 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         const prevSObj       = this._sObjectType;
         this._sObjectType    = newSObj;
         this._pageType       = ref.type ?? 'other';
-        if (newSObj && newSObj !== prevSObj) this._loadContextPanel(newSObj);
+        if (newSObj && newSObj !== prevSObj) {
+            this._loadContextPanel(newSObj);
+            this._seedWorkerKvSchema(newSObj);  // Warm Worker KV schema cache for Jev template validation
+        }
         // Load summary when on a record page and context has changed
         if (this._recordId && (this._recordId !== prevRecordId || newSObj !== prevSObj)) {
+            // Clear transient cards from previous page so summary can show
+            this._soqlQuery      = null;
+            this._insightAction  = null;
+            this._knowledgeAlert = null;
+            this.searchResults   = [];
             this._loadSummary(newSObj, this._recordId);
         } else if (!this._recordId && this._summaryResult) {
             this._summaryResult  = null;
@@ -204,6 +226,11 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     }
 
     @wire(MessageContext) _msgCtx;
+    @wire(getUserNavItems)
+    wiredNavItems({ data, error }) {
+        if (data) this._navItems = JSON.parse(JSON.stringify(data));
+        if (error) this._navItems = [];
+    }
 
     // ── State ─────────────────────────────────────────────────────────────────
     @track inputText      = '';
@@ -226,6 +253,13 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     @track _pendingRules      = [];     // rules awaiting approval
     @track _allRules          = [];     // rules for settings modal
     @track _showSettings      = false;
+    @track _claudeConnected   = false;
+    @track _savingApiKey      = false;
+    @track _apiKeyInput       = '';
+    @track _creatingAnalytics = false;
+    @track _analyticsResult   = null;   // { reportId, reportUrl, dashboardId, dashboardUrl, reportName, dashboardName }
+    @track _analyticsIntent   = null;   // 'CREATE_REPORT' | 'CREATE_DASHBOARD'
+    @track _analyticsRequest  = null;   // verbatim user request
     @track _editingRuleId     = null;
     @track _editingRuleText   = '';
     // Context panel (ambient field guide + semantic rules)
@@ -234,6 +268,8 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     // SOQL smart search
     @track _soqlQuery         = null;   // { sObject, conditions, orderBy, limit, selectFields, records, summary, isLoading }
     @track _savedQueries      = [];     // personal shortcuts from localStorage
+    @track _recentRecords     = [];     // from RecentlyViewed SOQL
+    @track _recentPrompts     = [];     // from localStorage
     @track _viewMode          = 'card'; // 'card' | 'table'
     _isWideMode               = false;
     _resizeObs                = null;
@@ -252,11 +288,28 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     _csvRowStatuses           = [];    // [{ status:'OK'|'NG', error:string|null }] indexed by data row
     // Parent-child lookup resolver
     @track _parentState       = null;  // { field, parentSObj, labelJa, labelEn, selectedParent, candidates, isSearching, searchText }
+    // Mass editor overlay (legacy — kept for external use)
+    @track _showMassEditor    = false;
+    // Navigation hub
+    @track _navItems           = [];
+    @track _pinDialogOpen      = false;
+    @track _pinLabel           = '';
+    @track _pinSaving          = false;
+    // Inline table edit mode
+    @track _tableEditMode      = false;
+    @track _tableDraftMap      = {};    // { recordId: { apiName: value } }
+    @track _tableSchema        = {};    // { apiName: ColumnMeta }
+    @track _tableSchemaLoading = false;
+    @track _tableSaving        = false;
+    @track _tableErrors        = {};    // { recordId: errorMessage }
+    @track _tableSaved         = {};    // { recordId: true }
 
     _recordId     = null;
     _sObjectType  = null;
     _pageType     = 'other';
     _undoSnapshot = null;
+    _reportSummary = null;       // REPORT_EXPLAIN: plain-language summary from Jev runtime
+    _workerKvSeeded = new Set(); // sObject API names already seeded into Worker KV this session
 
     // ── i18n ─────────────────────────────────────────────────────────────────
 
@@ -411,9 +464,10 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
 
     get hasSummaryCard() {
         if (!this._recordId || !this._sObjectType) return false;
+        // hasPendingApprovals is a bottom notification, not a replacement for the summary
         const hasActiveCard = this.hasPrefill || this.hasGuide || this.hasResults ||
                               this.hasInsight || this.hasKnowledgeAlert || this.hasAddressCard ||
-                              this.hasPendingApprovals || this.hasCsvImport || this.hasSoqlResults;
+                              this.hasCsvImport || this.hasSoqlResults;
         if (hasActiveCard) return false;
         return (this._summaryResult?.fields?.length ?? 0) > 0;
     }
@@ -426,16 +480,55 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     }
 
     get summaryFieldRows() {
-        return (this._summaryResult?.fields ?? []).map(f => ({
+        return (this._summaryResult?.fields ?? []).map((f, i) => ({
+            rowKey:       f.apiName ?? String(i),
             apiName:      f.apiName,
-            label:        f.label,
+            label:        f.label ?? f.apiName ?? '—',
             isRequired:   f.isRequired,
-            displayValue: f.value != null ? f.value : '—',
+            displayValue: f.value != null ? String(f.value) : '—',
             cssClass:     `furu-bar__summary-field${f.isRequired ? ' furu-bar__summary-field--req' : ''}`,
         }));
     }
 
     get summaryEditSaveLabel() { return this.isJa ? '保存' : 'Save'; }
+
+    // Skips for:each when editing, avoids lwc:unless issues inside nested templates
+    get summaryDisplayRows() {
+        if (this._summaryEditing) return [];
+        return this.summaryFieldRows;
+    }
+
+    // ── Recent Records & Prompt Suggestions ───────────────────────────────────
+
+    get showSuggestions() {
+        if (this.inputText.trim() !== '') return false;
+        if (this.isLoading) return false;
+        const hasActiveCard = this.hasPrefill || this.hasGuide || this.hasResults ||
+                              this.hasInsight || this.hasKnowledgeAlert || this.hasAddressCard ||
+                              this.hasCsvImport || this.hasSoqlResults;
+        if (hasActiveCard) return false;
+        return this._recentRecords.length > 0 || this._recentPrompts.length > 0;
+    }
+
+    get hasRecentRecords() { return this._recentRecords.length > 0; }
+    get hasRecentPrompts() { return this._recentPrompts.length > 0; }
+
+    get recentRecordChips() {
+        return this._recentRecords.map(r => ({
+            id:   r.id,
+            icon: r.icon,
+            name: r.name.length > 18 ? r.name.slice(0, 16) + '…' : r.name,
+            type: r.type,
+        }));
+    }
+
+    get recentPromptChips() {
+        return this._recentPrompts.map((p, i) => ({
+            key:   String(i),
+            text:  p,
+            label: p.length > 22 ? p.slice(0, 20) + '…' : p,
+        }));
+    }
 
     // ── Child record quick-action chip getters ────────────────────────────────
 
@@ -525,13 +618,19 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     // Table rows — Name rendered as sticky td; cells contain all other fields
     get soqlTableRows() {
         if (!this._soqlQuery?.records?.length) return [];
-        const fields = this._soqlQuery.selectFields ?? [];
-        const today  = new Date();
+        const fields    = this._soqlQuery.selectFields ?? [];
+        const today     = new Date();
+        const editMode  = this._tableEditMode;
+        const schema    = this._tableSchema;
+        const draftMap  = this._tableDraftMap;
+
         return this._soqlQuery.records.map((rec, ri) => {
-            const lastAct   = rec['LastActivityDate'];
-            const daysSince = lastAct ? Math.floor((today - new Date(lastAct)) / 86400000) : null;
+            const lastAct    = rec['LastActivityDate'];
+            const daysSince  = lastAct ? Math.floor((today - new Date(lastAct)) / 86400000) : null;
             const isInactive = (daysSince != null && daysSince >= INACTIVE_DAYS)
                 || (!lastAct && fields.some(f => f.apiName === 'LastActivityDate'));
+            const id       = rec['Id'] ?? '';
+            const recDraft = draftMap[id] ?? {};
 
             const cells = fields
                 .filter(f => f.apiName !== 'Name' && f.apiName !== 'CaseNumber')
@@ -541,16 +640,85 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
                     if (f.apiName === 'Amount' && raw != null)         val = '￥' + Number(raw).toLocaleString();
                     else if (f.apiName === 'LastActivityDate' && raw)  val = `${daysSince}日前${isInactive ? ' ⚠️' : ''}`;
                     else if (f.apiName === 'LastActivityDate' && !raw) val = '—';
-                    return { key: `${ri}_${ci}`, value: val };
+
+                    if (!editMode) {
+                        return { key: `${ri}_${ci}`, apiName: f.apiName, value: val,
+                                 cellClass: 'furu-bar__soql-td' };
+                    }
+
+                    const col       = schema[f.apiName];
+                    const ft        = (col?.fieldType ?? '').toUpperCase();
+                    const isEdit    = col?.isEditable ?? false;
+                    const hasDraft  = Object.prototype.hasOwnProperty.call(recDraft, f.apiName);
+                    const rawStr    = raw == null ? '' : String(raw);
+                    const draftVal  = hasDraft ? recDraft[f.apiName] : null;
+                    const inputVal  = hasDraft ? String(draftVal ?? '') : rawStr;
+                    const boolVal   = hasDraft ? (draftVal === true || draftVal === 'true') : (raw === true);
+                    const isPicklist = ft === 'PICKLIST';
+                    const isBoolean  = ft === 'BOOLEAN';
+                    const isNumber   = ft === 'CURRENCY' || ft === 'DOUBLE' || ft === 'PERCENT' || ft === 'INTEGER';
+                    const isDate     = ft === 'DATE';
+                    const inputType  = isNumber ? 'number' : isDate ? 'date' : 'text';
+
+                    const picklistOptions = (col?.picklistOptions ?? []).map(o => ({
+                        label: o.label, value: o.value, isSelected: o.value === inputVal,
+                    }));
+
+                    const cellClass = 'furu-bar__soql-td'
+                        + (hasDraft                ? ' furu-bar__soql-td--dirty' : '')
+                        + (this._tableErrors[id]   ? ' furu-bar__soql-td--row-error' : '');
+
+                    return {
+                        key: `${ri}_${ci}`,
+                        apiName: f.apiName,
+                        value: val,
+                        inputVal,
+                        boolVal,
+                        isDirty: hasDraft,
+                        isEditable: isEdit,
+                        isPicklist,
+                        isBoolean,
+                        isText: isEdit && !isPicklist && !isBoolean,
+                        inputType,
+                        picklistOptions,
+                        cellClass,
+                    };
                 });
 
-            return { key: String(ri), id: rec['Id'] ?? '', isInactive,
+            const rowClass = 'furu-bar__soql-tr'
+                + (this._tableErrors[id] ? ' furu-bar__soql-tr--error' : '')
+                + (this._tableSaved[id]  ? ' furu-bar__soql-tr--saved' : '');
+
+            return { key: String(ri), id, isInactive, rowClass,
                      name: rec['Name'] ?? rec['CaseNumber'] ?? `#${ri + 1}`, cells };
         });
     }
 
     handleViewModeCard()  { this._viewMode = 'card';  }
     handleViewModeTable() { this._viewMode = 'table'; }
+
+    get isTableEditMode()    { return this._tableEditMode; }
+    get tableHasDirty()      { return Object.keys(this._tableDraftMap).length > 0; }
+    get tableDirtyCount()    { return Object.keys(this._tableDraftMap).length; }
+    get tableSaveDisabled()  { return this._tableSaving || !this.tableHasDirty; }
+    get tableSchemaLoading() { return this._tableSchemaLoading; }
+    get tableSaving()        { return this._tableSaving; }
+
+    get hasNavItems()    { return this._navItems.length > 0; }
+    get navItemRows()    {
+        return this._navItems.map(item => ({
+            id:          item.Id,
+            label:       item.Label__c,
+            icon:        item.Icon_Name__c ?? '📌',
+            targetType:  item.Target_Type__c,
+            isListEditor: item.Target_Type__c === 'ListEditor',
+            isPage:       item.Target_Type__c === 'Page',
+        }));
+    }
+    get pinDialogOpen()  { return this._pinDialogOpen; }
+    get canPinQuery()    { return !!(this._soqlQuery?.records?.length); }
+    get pinSaving()      { return this._pinSaving; }
+    get pinLabel()       { return this._pinLabel; }
 
     get csvProgressStyle() {
         const total = this._csvState?.rows?.length ?? 1;
@@ -802,6 +970,30 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             })
             .catch(() => {});
         this._savedQueries = this._loadSavedQueries();
+        this._loadRecentPrompts();
+        getRecentRecords()
+            .then(recs => { this._recentRecords = JSON.parse(JSON.stringify(recs ?? [])); })
+            .catch(() => {});
+        checkClaudeStatus().then(connected => { this._claudeConnected = connected; }).catch(() => {});
+        // Seed Worker KV with org's custom object catalog for Jev dynamic sObject criteria.
+        // Fire-and-forget: non-blocking, doesn't affect first render.
+        this._seedCustomSObjectsToWorkerKv();
+    }
+
+    _seedCustomSObjectsToWorkerKv() {
+        getCustomSObjectsForKv()
+            .then(objects => {
+                if (!objects?.length) return;
+                fetch('/services/apexrest/FuruAgent/sobjects-seed', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Salesforce-Org-Id': this._orgId ?? '',
+                    },
+                    body: JSON.stringify({ objects }),
+                }).catch(() => {});
+            })
+            .catch(() => {});
     }
 
     renderedCallback() {
@@ -844,6 +1036,46 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     _persistSavedQueries(list) {
         try { localStorage.setItem(this._queryStorageKey(), JSON.stringify(list)); }
         catch (_) {}
+    }
+
+    // ── Recent prompt history (localStorage) ──────────────────────────────────
+
+    _promptHistoryKey() {
+        return `furubar_ph_${(userId ?? 'anon').slice(-8)}`;
+    }
+
+    _loadRecentPrompts() {
+        try {
+            const raw = localStorage.getItem(this._promptHistoryKey());
+            this._recentPrompts = raw ? JSON.parse(raw) : [];
+        } catch (_) { this._recentPrompts = []; }
+    }
+
+    _saveRecentPrompt(text) {
+        if (!text || text.length > 200) return;
+        try {
+            const existing = this._recentPrompts;
+            const updated  = [text, ...existing.filter(p => p !== text)].slice(0, 5);
+            localStorage.setItem(this._promptHistoryKey(), JSON.stringify(updated));
+            this._recentPrompts = updated;
+        } catch (_) {}
+    }
+
+    handleRecordChip(e) {
+        const id   = e.currentTarget.dataset.id;
+        const type = e.currentTarget.dataset.type;
+        this[NavigationMixin.Navigate]({
+            type:       'standard__recordPage',
+            attributes: { recordId: id, objectApiName: type, actionName: 'view' },
+        });
+    }
+
+    handlePromptChip(e) {
+        const prompt = e.currentTarget.dataset.prompt;
+        if (!prompt) return;
+        this.inputText = prompt;
+        // Small delay so inputText is reflected in the textarea before submit
+        setTimeout(() => this.handleSubmit(), 0);
     }
 
     _saveQuery(nameOverride) {
@@ -913,6 +1145,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     }
 
     async _runSoqlFromSaved(saved) {
+        this._clearTableEditState();
         this._soqlQuery = {
             sObject:      saved.sObject,
             conditions:   saved.conditions,
@@ -984,7 +1217,10 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         this._summaryAllFields = [];
         if (!sobj || !recordId) return;
         getRecordSummary({ sObjectApiName: sobj, recordId })
-            .then(result => { this._summaryResult = result; })
+            .then(result => {
+                // JSON round-trip unwraps the LWC read-only proxy so for:each can iterate
+                this._summaryResult = JSON.parse(JSON.stringify(result ?? {}));
+            })
             .catch(() => {});
     }
 
@@ -993,7 +1229,15 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             this._summaryEditing = true;
             if (this._summaryAllFields.length === 0) {
                 try {
-                    this._summaryAllFields = await getCandidateFields({ sObjectApiName: this._sObjectType });
+                    const raw = await getCandidateFields({ sObjectApiName: this._sObjectType });
+                    const valueMap = {};
+                    (this._summaryResult?.fields ?? []).forEach(f => {
+                        if (f.apiName && f.value != null) valueMap[f.apiName] = f.value;
+                    });
+                    this._summaryAllFields = JSON.parse(JSON.stringify(raw)).map(f => ({
+                        ...f,
+                        displayValue: valueMap[f.apiName] ?? null,
+                    }));
                 } catch(e) {
                     this._summaryEditing = false;
                 }
@@ -1037,10 +1281,36 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
 
     get isAdmin()           { return this._isAdmin; }
     get showSettings()      { return this._showSettings; }
+
+    // ── Claude / Analytics getters ────────────────────────────────────────────
+    get claudeConnected()       { return this._claudeConnected; }
+    get saveApiKeyLabel()       { return this._savingApiKey ? (this.isJa ? '保存中…' : 'Saving…') : (this.isJa ? '保存' : 'Save'); }
+    get saveApiKeyDisabled()    { return this._savingApiKey || !this._apiKeyInput.startsWith('sk-ant-'); }
+    get creatingAnalytics()    { return this._creatingAnalytics; }
+    get analyticsResult()      { return this._analyticsResult; }
+    get hasAnalyticsResult()   { return this._analyticsResult != null && !this._creatingAnalytics; }
+    get analyticsIsDashboard() { return this._analyticsIntent === 'CREATE_DASHBOARD'; }
+    get analyticsSuccessTitle() {
+        return this.analyticsIsDashboard
+            ? (this.isJa ? '🎉 ダッシュボードを作成しました' : '🎉 Dashboard Created')
+            : (this.isJa ? '🎉 レポートを作成しました'     : '🎉 Report Created');
+    }
+    get analyticsCreatingLabel() {
+        return this._analyticsIntent === 'CREATE_DASHBOARD'
+            ? (this.isJa ? 'Claudeがダッシュボードを生成中…' : 'Claude is generating the dashboard…')
+            : (this.isJa ? 'Claudeがレポートを生成中…'       : 'Claude is generating the report…');
+    }
     get hasPendingApprovals() { return this._isAdmin && this._pendingRules.length > 0; }
     get pendingRule()       { return this._pendingRules[0] ?? null; }
     get allRules()          { return this._allRules.map(r => ({ ...r, isEditing: r.id === this._editingRuleId })); }
-    get pendingRuleText()   { return this.pendingRule?.ruleText ?? ''; }
+    get pendingRuleText() {
+        const r = this.pendingRule;
+        if (!r) return '';
+        if (r.ruleText) return r.ruleText;
+        if (r.triggerField) return `${r.sObjectType} の「${r.triggerField}」フィールドに関するルール（詳細翻訳中）`;
+        if (r.errorMessage) return r.errorMessage;
+        return '（ルール内容未設定）';
+    }
     get pendingRuleCount()  { return this._pendingRules.length; }
     get pendingBadge()      {
         const n = this._pendingRules.length;
@@ -1091,6 +1361,99 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
 
     openSettings() { this._showSettings = true; this._loadAllRules(); }
     closeSettings() { this._showSettings = false; this._editingRuleId = null; }
+
+    // ── Claude API key (admin) ────────────────────────────────────────────────
+
+    handleApiKeyInput(e) {
+        this._apiKeyInput = e.target.value?.trim() ?? '';
+    }
+
+    async handleSaveApiKey() {
+        if (!this._apiKeyInput.startsWith('sk-ant-')) return;
+        this._savingApiKey = true;
+        try {
+            await saveClaudeApiKey({ apiKey: this._apiKeyInput });
+            this._claudeConnected = true;
+            this._apiKeyInput     = '';
+            this._setStatus(this.isJa ? 'Anthropic APIキーを保存しました。' : 'Anthropic API key saved.', 'success');
+        } catch(e) {
+            this._setStatus(e.body?.message ?? e.message, 'error');
+        } finally {
+            this._savingApiKey = false;
+        }
+    }
+
+    async handleDisconnectClaude() {
+        try {
+            await disconnectClaude();
+            this._claudeConnected = false;
+            this._setStatus(this.isJa ? 'Claude連携を解除しました。' : 'Disconnected from Claude.', 'info');
+        } catch(e) { this._setStatus(e.body?.message ?? e.message, 'error'); }
+    }
+
+    // ── Analytics creation ────────────────────────────────────────────────────
+
+    async _doCreateAnalytics(action) {
+        if (!this._claudeConnected) {
+            this._analyticsIntent  = action.intent;
+            this._analyticsRequest = action.analyticsRequest;
+            this._analyticsResult  = null;
+            this._setStatus(this.isJa
+                ? 'Dashboard BuilderにはAnthropicのAPIキーが必要です。管理者に設定を依頼してください。'
+                : 'Dashboard Builder requires an Anthropic API key — ask your admin to configure it in Settings.', 'warning');
+            return;
+        }
+        this._analyticsIntent  = action.intent;
+        this._analyticsRequest = action.analyticsRequest ?? action.message;
+        this._analyticsResult  = null;
+        this._creatingAnalytics = true;
+        this._setStatus(this.isJa ? 'Claudeがレポートを生成中…' : 'Claude is generating the report…', 'info');
+        try {
+            const result = await createAnalytics({
+                analyticsRequest: this._analyticsRequest,
+                intent:           action.intent,
+                sObjectType:      action.updateSObject ?? this._sObjectType ?? 'Opportunity'
+            });
+            this._analyticsResult  = result;
+            this._creatingAnalytics = false;
+            this._setStatus('', '');
+        } catch(e) {
+            this._creatingAnalytics = false;
+            const msg = e.body?.message ?? e.message ?? '';
+            if (msg === 'CLAUDE_AUTH_REQUIRED') {
+                this._claudeConnected = false;
+                this._setStatus(this.isJa
+                    ? 'AnthropicのAPIキーが無効または期限切れです。管理者に再設定を依頼してください。'
+                    : 'Anthropic API key is invalid or revoked — ask your admin to update it in Settings.', 'warning');
+            } else {
+                this._setStatus(msg || 'Analytics creation failed', 'error');
+            }
+        }
+    }
+
+    handleOpenAnalyticsReport() {
+        if (this._analyticsResult?.reportUrl) {
+            this[NavigationMixin.Navigate]({
+                type: 'standard__webPage',
+                attributes: { url: this._analyticsResult.reportUrl }
+            });
+        }
+    }
+
+    handleOpenAnalyticsDashboard() {
+        if (this._analyticsResult?.dashboardUrl) {
+            this[NavigationMixin.Navigate]({
+                type: 'standard__webPage',
+                attributes: { url: this._analyticsResult.dashboardUrl }
+            });
+        }
+    }
+
+    handleDismissAnalytics() {
+        this._analyticsResult  = null;
+        this._analyticsIntent  = null;
+        this._analyticsRequest = null;
+    }
 
     async handleToggleRule(e) {
         const id     = e.currentTarget.dataset.id;
@@ -1265,6 +1628,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     async handleSubmit() {
         const text = this.inputText.trim();
         if (!text || this.isLoading) return;
+        this._saveRecentPrompt(text);
 
         this.isLoading        = true;
         this.statusMessage    = '';
@@ -1320,6 +1684,9 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
                 case 'ADD_FIELDS':     this._doAddFields(action);       break;
                 case 'EXPLAIN_FIELD':  this._doInsight(action);         break;
                 case 'EXPLAIN_FORMULA':this._doInsight(action);         break;
+                case 'CREATE_REPORT':
+                case 'CREATE_DASHBOARD': await this._doCreateAnalytics(action); break;
+                case 'REPORT_EXPLAIN':   this._doReportExplain(action);  break;
                 // UNKNOWN with a question message = model is asking for clarification
                 default: {
                     const msg = action.message || (this.isJa ? 'リクエストを理解できませんでした。' : 'Could not understand request.');
@@ -1464,8 +1831,9 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     // ── SOQL Smart Search ─────────────────────────────────────────────────────
 
     _doSoqlSearch(action) {
+        this._clearTableEditState();
         const sObj    = action.updateSObject ?? this._sObjectType ?? '';
-        const records = action.soqlRecords ?? [];
+        const records = (action.soqlRecords ?? []).filter(r => r != null);
         let conditions = [], orderBy = 'Amount DESC', limit = 20;
         try {
             const raw = JSON.parse(action.soqlFilterJson ?? '[]');
@@ -1492,6 +1860,51 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             this.isJa ? `${records.length}件が見つかりました` : `${records.length} record(s) found`,
             'info'
         );
+    }
+
+    // ── REPORT_EXPLAIN ────────────────────────────────────────────────────────
+    // Routes through FlashBarAgentforceRuntime so report data stays in Salesforce.
+    _doReportExplain(action) {
+        const reportId = action.reportId ?? action.target_record_id;
+        if (!reportId) {
+            this._setStatus(this.isJa ? 'レポートIDが見つかりません' : 'Report ID not found', 'warning');
+            return;
+        }
+        this.isLoading = true;
+        const payload = JSON.stringify({ intent: 'REPORT_EXPLAIN', reportId });
+        executeJevIntent({ intentPayloadJson: payload })
+            .then(result => {
+                this._reportSummary = result.reportSummary;
+                this._setStatus(result.message ?? (this.isJa ? 'レポートを説明しました' : 'Report explained'), 'info');
+            })
+            .catch(err => {
+                this._setStatus('Error: ' + (err.body?.message ?? err.message ?? 'Unknown'), 'error');
+            })
+            .finally(() => { this.isLoading = false; });
+    }
+
+    // ── Worker KV schema seeding ──────────────────────────────────────────────
+    // Seeds accessible field API names into Worker KV so SOQL template builder
+    // can validate fields without calling Salesforce. One-shot per sObject per session.
+    _seedWorkerKvSchema(sObjectType) {
+        if (!sObjectType || this._workerKvSeeded.has(sObjectType)) return;
+        this._workerKvSeeded.add(sObjectType);
+        getSchemaForWorkerKv({ sObjectType })
+            .then(fields => {
+                if (!fields?.length) return;
+                // Fire-and-forget POST to Worker /v1/schema-seed via existing Named Credential
+                // The Worker caches these field names in KV (TTL 1 h) for SOQL field validation.
+                // We use a non-awaited fetch here so it never blocks the main UI flow.
+                const orgId = this._orgId;
+                if (orgId) {
+                    fetch('/services/apexrest/FuruAgent/schema-seed', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ sObjectType, fieldApiNames: fields }),
+                    }).catch(() => {});
+                }
+            })
+            .catch(() => {});
     }
 
     async _doAddFields(action) {
@@ -1561,7 +1974,208 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         }
     }
 
-    dismissSoqlResults() { this._soqlQuery = null; }
+    dismissSoqlResults() { this._soqlQuery = null; this._clearTableEditState(); }
+
+    // ── Mass Editor ───────────────────────────────────────────────────────────
+
+    handleOpenMassEditor() {
+        if (this._soqlQuery?.records?.length) this._showMassEditor = true;
+    }
+
+    handleMassEditorClose(e) {
+        this._showMassEditor = false;
+        if (e?.detail?.savedCount > 0) {
+            this._setStatus(`${e.detail.savedCount}件を一括保存しました`, 'success');
+        }
+    }
+
+    get massEditorFieldNames() {
+        return (this._soqlQuery?.selectFields ?? []).map(f => f.apiName);
+    }
+
+    get massEditorRecords() {
+        return this._soqlQuery?.records ?? [];
+    }
+
+    // ── Navigation hub ────────────────────────────────────────────────────────
+
+    handleNavItemClick(e) {
+        const id = e.currentTarget.dataset.id;
+        const item = this._navItems.find(n => n.Id === id);
+        if (!item) return;
+        if (item.Target_Type__c === 'ListEditor') {
+            try {
+                const saved = JSON.parse(item.Target_SOQL_Filter__c ?? '{}');
+                if (saved.sObject) this._runSoqlFromSaved(saved);
+            } catch (_) {
+                this._setStatus(this.isJa ? 'クエリ読み込みエラー' : 'Query parse error', 'error');
+            }
+        } else if (item.Target_Type__c === 'Page' && item.Target_URL_Page__c) {
+            this[NavigationMixin.Navigate]({
+                type: 'standard__webPage',
+                attributes: { url: item.Target_URL_Page__c },
+            });
+        }
+    }
+
+    async handleDeleteNavItem(e) {
+        const id = e.currentTarget.dataset.id;
+        const prev = this._navItems;
+        this._navItems = this._navItems.filter(n => n.Id !== id);
+        try {
+            await deleteNavItem({ itemId: id });
+        } catch (err) {
+            this._navItems = prev;
+            this._setStatus(err.body?.message ?? (this.isJa ? '削除エラー' : 'Delete failed'), 'error');
+        }
+    }
+
+    handleOpenPinDialog() {
+        if (!this._soqlQuery?.records?.length) return;
+        this._pinLabel    = this._soqlQuery.summary ?? '';
+        this._pinDialogOpen = true;
+    }
+
+    handlePinLabelChange(e) {
+        this._pinLabel = e.target.value;
+    }
+
+    handleClosePinDialog() {
+        this._pinDialogOpen = false;
+        this._pinLabel      = '';
+    }
+
+    async handlePinSave() {
+        if (!this._pinLabel.trim() || !this._soqlQuery) return;
+        this._pinSaving = true;
+        try {
+            const saved = {
+                name:         this._pinLabel.trim(),
+                sObject:      this._soqlQuery.sObject,
+                conditions:   this._soqlQuery.conditions,
+                orderBy:      this._soqlQuery.orderBy,
+                limit:        this._soqlQuery.limit,
+                selectFields: this._soqlQuery.selectFields,
+                useCount:     0,
+            };
+            const newItem = await pinQuery({
+                label:    this._pinLabel.trim(),
+                soqlJson: JSON.stringify(saved),
+                iconName: '📌',
+            });
+            this._navItems = [...this._navItems, JSON.parse(JSON.stringify(newItem))];
+            this._pinDialogOpen = false;
+            this._pinLabel      = '';
+            this._setStatus(
+                this.isJa ? `✅「${saved.name}」をナビゲーションに追加しました` : `✅ Pinned "${saved.name}"`,
+                'success'
+            );
+        } catch (err) {
+            this._setStatus(err.body?.message ?? (this.isJa ? 'ピン留めエラー' : 'Pin failed'), 'error');
+        } finally {
+            this._pinSaving = false;
+        }
+    }
+
+    // ── Inline table edit mode ────────────────────────────────────────────────
+
+    _clearTableEditState() {
+        this._tableEditMode      = false;
+        this._tableDraftMap      = {};
+        this._tableSchema        = {};
+        this._tableErrors        = {};
+        this._tableSaved         = {};
+    }
+
+    async handleToggleTableEdit() {
+        if (this._tableEditMode) {
+            this._tableEditMode = false;
+            this._tableDraftMap = {};
+            this._tableErrors   = {};
+            this._tableSaved    = {};
+            return;
+        }
+        if (Object.keys(this._tableSchema).length === 0) {
+            this._tableSchemaLoading = true;
+            try {
+                const fieldNames = (this._soqlQuery?.selectFields ?? []).map(f => f.apiName);
+                const raw = await getEditSchema({
+                    sObjectType: this._soqlQuery?.sObject ?? '',
+                    fieldsJson:  JSON.stringify(fieldNames),
+                });
+                const schemaMap = {};
+                JSON.parse(JSON.stringify(raw)).forEach(col => { schemaMap[col.apiName] = col; });
+                this._tableSchema = schemaMap;
+            } catch (e) {
+                this._setStatus(
+                    this.isJa
+                        ? 'スキーマ読み込みエラー: ' + (e.body?.message ?? e.message ?? '')
+                        : 'Schema load error: ' + (e.body?.message ?? e.message ?? ''),
+                    'error'
+                );
+                return;
+            } finally {
+                this._tableSchemaLoading = false;
+            }
+        }
+        this._tableEditMode = true;
+    }
+
+    handleTableCellChange(e) {
+        const recordId = e.target.dataset.recordId;
+        const apiName  = e.target.dataset.apiName;
+        if (!recordId || !apiName) return;
+        const val = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+        const prev = this._tableDraftMap[recordId] ?? {};
+        this._tableDraftMap = { ...this._tableDraftMap, [recordId]: { ...prev, [apiName]: val } };
+    }
+
+    handleTableDiscard() {
+        this._tableDraftMap = {};
+        this._tableErrors   = {};
+        this._tableSaved    = {};
+    }
+
+    async handleTableSave() {
+        const dirtyIds = Object.keys(this._tableDraftMap);
+        if (!dirtyIds.length) return;
+        const recordsToSave = dirtyIds.map(id => ({ Id: id, ...this._tableDraftMap[id] }));
+        this._tableSaving = true;
+        try {
+            const result = await updateMassiveRecords({
+                sObjectType: this._soqlQuery?.sObject ?? '',
+                recordsJson: JSON.stringify(recordsToSave),
+            });
+            const saved = {};
+            (result.successIds ?? []).forEach(id => { saved[id] = true; });
+            this._tableSaved = saved;
+            const errors = {};
+            (result.errors ?? []).forEach(e => { errors[e.recordId] = e.errorMessage; });
+            this._tableErrors = errors;
+            const newDraft = { ...this._tableDraftMap };
+            (result.successIds ?? []).forEach(id => { delete newDraft[id]; });
+            this._tableDraftMap = newDraft;
+            const savedCount = (result.successIds ?? []).length;
+            const errCount   = (result.errors ?? []).length;
+            if (errCount === 0) {
+                this._setStatus(
+                    this.isJa ? `✅ ${savedCount}件を保存しました` : `✅ Saved ${savedCount} record(s)`,
+                    'success'
+                );
+            } else {
+                this._setStatus(
+                    this.isJa
+                        ? `⚠️ ${savedCount}件成功、${errCount}件エラー`
+                        : `⚠️ ${savedCount} saved, ${errCount} error(s)`,
+                    'warning'
+                );
+            }
+        } catch (e) {
+            this._setStatus(e.body?.message ?? (this.isJa ? '保存エラー' : 'Save failed'), 'error');
+        } finally {
+            this._tableSaving = false;
+        }
+    }
 
     handleSoqlRecordNavigate(e) {
         const id = e.currentTarget.dataset.id;
