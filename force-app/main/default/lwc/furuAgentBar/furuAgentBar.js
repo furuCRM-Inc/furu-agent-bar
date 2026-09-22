@@ -984,14 +984,30 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         getCustomSObjectsForKv()
             .then(objects => {
                 if (!objects?.length) return;
+                const orgId = this._orgId ?? '';
+                // Seed custom object catalog for Jev dynamic Choice criteria.
                 fetch('/services/apexrest/FuruAgent/sobjects-seed', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Salesforce-Org-Id': this._orgId ?? '',
-                    },
+                    headers: { 'Content-Type': 'application/json', 'X-Salesforce-Org-Id': orgId },
                     body: JSON.stringify({ objects }),
                 }).catch(() => {});
+                // Build and seed synonym map: label/pluralLabel → apiName.
+                // This lets the Worker resolve "発注" → "Purchase_Order__c" even if
+                // the term falls outside Jev's 12-slot Choice list.
+                const synonyms = {};
+                for (const obj of objects) {
+                    if (obj.label)       synonyms[obj.label]       = obj.apiName;
+                    if (obj.pluralLabel && obj.pluralLabel !== obj.label) {
+                        synonyms[obj.pluralLabel] = obj.apiName;
+                    }
+                }
+                if (Object.keys(synonyms).length > 0) {
+                    fetch('/services/apexrest/FuruAgent/synonyms-seed', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Salesforce-Org-Id': orgId },
+                        body: JSON.stringify({ synonyms }),
+                    }).catch(() => {});
+                }
             })
             .catch(() => {});
     }
