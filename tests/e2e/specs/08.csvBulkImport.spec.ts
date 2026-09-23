@@ -16,6 +16,13 @@ const LEAD_CSV = [
   'E2ETest_鈴木,E2E株式会社_C,e2e-suzuki@test.local,Web',
 ].join('\n');
 
+// CSV with one valid row and one row missing required LastName — forces a DML NG
+const BAD_LEAD_CSV = [
+  'LastName,Company,Email',
+  'E2ETest_ValidRow,E2E Corp NG-A,e2e-ng-valid@test.local',
+  ',E2E Corp NG-B,e2e-ng-noname@test.local',
+].join('\n');
+
 test.describe('CSV Bulk Import', () => {
   let bar: FuruBarPage;
 
@@ -206,5 +213,65 @@ test.describe('CSV Bulk Import', () => {
       return (root.querySelector('a[download]') as HTMLAnchorElement)?.href ?? '';
     });
     expect(href).toContain('data:text/csv');
+  });
+
+  test('result CSV contains NG status and error message for failed rows', async ({ page }) => {
+    // Drop CSV that has one valid row and one row missing required LastName
+    await page.evaluate((csv: string) => {
+      const bar = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Blob([csv], { type: 'text/csv' })], 'leads_bad.csv', { type: 'text/csv' }));
+      (root.querySelector('.furu-bar__input-card') as HTMLElement)
+        ?.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    }, BAD_LEAD_CSV);
+
+    await page.waitForFunction(() => {
+      const bar = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      return !!root.querySelector('.furu-bar__csv-map-row');
+    }, { timeout: 60_000 });
+
+    await page.evaluate(() => {
+      const bar = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      const btns = Array.from(root.querySelectorAll('button'));
+      (btns.find(b => b.textContent?.includes('インポート') || b.textContent?.includes('Import')) as HTMLButtonElement | undefined)?.click();
+    });
+
+    // Wait for result download link (data: URI is set directly on the <a> element)
+    await page.waitForFunction(() => {
+      const bar = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      const a = root.querySelector('a[download]') as HTMLAnchorElement | null;
+      return !!(a?.href?.startsWith('data:'));
+    }, { timeout: 120_000 });
+
+    // Decode the base64 data URI directly in the browser — no file save needed
+    const csvText = await page.evaluate(() => {
+      const bar = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      const href = (root.querySelector('a[download]') as HTMLAnchorElement)?.href ?? '';
+      const b64 = href.split(',')[1];
+      return b64 ? atob(b64) : '';
+    });
+
+    const content = csvText.replace(/^﻿/, ''); // strip BOM
+    const lines   = content.split(/\r?\n/).filter(l => l.trim());
+    const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+
+    // Result CSV must include status and error columns
+    const statusIdx = headers.findIndex(h => /import_status|インポート結果/i.test(h));
+    const errorIdx  = headers.findIndex(h => /error_message|エラー内容/i.test(h));
+    expect(statusIdx, 'status column missing from result CSV').toBeGreaterThanOrEqual(0);
+    expect(errorIdx,  'error column missing from result CSV').toBeGreaterThanOrEqual(0);
+
+    // At least one row must be NG with a non-empty error
+    const dataRows = lines.slice(1).map(l =>
+      l.split(',').map(c => c.replace(/^"|"$/g, '').trim())
+    );
+    const ngRows = dataRows.filter(r => r[statusIdx] === 'NG');
+    expect(ngRows.length, 'expected at least one NG row').toBeGreaterThanOrEqual(1);
+    expect(ngRows[0][errorIdx], 'NG row must have a non-empty error message').toBeTruthy();
   });
 });
