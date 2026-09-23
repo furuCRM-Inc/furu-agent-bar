@@ -23,6 +23,10 @@ public with sharing class FlashBarSchemaCacheService {
     @TestVisible
     private static Map<String, List<CachedField>> txnCache = new Map<String, List<CachedField>>();
 
+    // Pending cache writes — populated on L3 miss, flushed by the caller AFTER any callout
+    @TestVisible
+    private static Map<String, String> pendingWrites = new Map<String, String>();
+
     // ── Data model ───────────────────────────────────────────────────────────
 
     public class CachedField {
@@ -144,16 +148,25 @@ public with sharing class FlashBarSchemaCacheService {
             }
         } catch (Exception ignored) { /* fall through to describe */ }
 
-        // L3 describe + async write — @future avoids DML-before-callout exception
+        // L3 describe — queue the write in pendingWrites so the caller can flush AFTER any callout
         List<CachedField> fresh = describeFields(sObjApiName);
         txnCache.put(sObjApiName, fresh);
-        try { persistCacheAsync(sObjApiName, JSON.serialize(fresh)); } catch (Exception ignored) {}
+        pendingWrites.put(sObjApiName, JSON.serialize(fresh));
         return fresh;
     }
 
-    @future
-    private static void persistCacheAsync(String sObjApiName, String jsonBody) {
-        persistCache(sObjApiName, jsonBody, findExistingId(sObjApiName));
+    /**
+     * Flush any pending L2 cache writes that were deferred to avoid DML-before-callout.
+     * Call this AFTER all HTTP callouts in the current transaction complete.
+     */
+    public static void flushPendingWrites() {
+        if (pendingWrites.isEmpty()) return;
+        for (String sObjApiName : pendingWrites.keySet()) {
+            try {
+                persistCache(sObjApiName, pendingWrites.get(sObjApiName), findExistingId(sObjApiName));
+            } catch (Exception ignored) {}
+        }
+        pendingWrites.clear();
     }
 
     /**

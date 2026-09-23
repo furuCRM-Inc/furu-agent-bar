@@ -224,7 +224,11 @@ public with sharing class FlashBarOCRController {
         }
 
         try {
-            if (isCreate) { insert rec; } else { update rec; }
+            if (isCreate) {
+                Database.insert(rec, AccessLevel.USER_MODE);
+            } else {
+                Database.update(rec, AccessLevel.USER_MODE);
+            }
             return rec.Id;
         } catch (DmlException dml) {
             throw new AuraHandledException(dml.getDmlMessage(0));

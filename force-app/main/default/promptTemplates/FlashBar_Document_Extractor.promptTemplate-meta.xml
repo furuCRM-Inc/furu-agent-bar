@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GenAiPromptTemplate xmlns="http://soap.sforce.com/2006/04/metadata">
+    <description>Analyzes business cards, invoices, and documents to extract Salesforce record fields. Supports Japanese name/address parsing and 7-digit postal code detection.</description>
+    <developerName>FlashBar_Document_Extractor</developerName>
+    <masterLabel>FlashBar Document Extractor</masterLabel>
+    <templateType>Flex</templateType>
+    <relatedEntity>Lead</relatedEntity>
+    <primaryModel>sfdc_ai__DefaultOpenAIGPT4Omni</primaryModel>
+    <inputRequirements>
+        <name>sObjectApiName</name>
+        <type>Primitive</type>
+    </inputRequirements>
+    <inputRequirements>
+        <name>fieldsSchema</name>
+        <type>Primitive</type>
+    </inputRequirements>
+    <inputRequirements>
+        <name>documentImage</name>
+        <type>Primitive</type>
+    </inputRequirements>
+</GenAiPromptTemplate>

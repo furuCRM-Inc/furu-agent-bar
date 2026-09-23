@@ -19,4 +19,8 @@
         <fieldName>fields</fieldName>
         <description>JSON string of fieldApiName: value pairs to pre-fill</description>
     </lightningMessageFields>
+    <lightningMessageFields>
+        <fieldName>warningMessage</fieldName>
+        <description>Optional proactive warning about missing required fields</description>
+    </lightningMessageFields>
 </LightningMessageChannel>

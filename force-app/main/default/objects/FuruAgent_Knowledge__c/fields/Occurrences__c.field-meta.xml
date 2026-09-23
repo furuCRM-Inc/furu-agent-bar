@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Occurrences__c</fullName>
+    <label>Occurrences</label>
+    <type>Number</type>
+    <precision>18</precision>
+    <scale>0</scale>
+    <required>false</required>
+    <externalId>false</externalId>
+    <unique>false</unique>
+    <defaultValue>1</defaultValue>
+    <description>Number of times this validation error has been encountered. Higher occurrences means higher priority in pre-DML warnings.</description>
+</CustomField>

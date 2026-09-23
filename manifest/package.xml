@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Package xmlns="http://soap.sforce.com/2006/04/metadata">
+    <version>62.0</version>
+
+    <!-- Apex Classes (runtime + test) -->
+    <types>
+        <members>FlashBarAdminController</members>
+        <members>FlashBarAdminControllerTest</members>
+        <members>FlashBarDashboardController</members>
+        <members>FlashBarMassEditService</members>
+        <members>FlashBarNavigationController</members>
+        <members>FlashBarOCRController</members>
+        <members>FlashBarRecentService</members>
+        <members>FlashBarSchemaCacheService</members>
+        <members>FlashBarSummaryService</members>
+        <members>FuruAgentController</members>
+        <members>FuruAgentControllerTest</members>
+        <name>ApexClass</name>
+    </types>
+
+    <!-- Lightning Web Components -->
+    <types>
+        <members>furuAgentBar</members>
+        <members>furuAgentCompanion</members>
+        <members>furuAgentMassEditor</members>
+        <name>LightningComponentBundle</name>
+    </types>
+
+    <!-- Custom Objects -->
+    <types>
+        <members>FuruAgent_Knowledge__c</members>
+        <members>FlashBar_Nav_Item__c</members>
+        <name>CustomObject</name>
+    </types>
+
+    <!-- Custom Fields on FuruAgent_Knowledge__c -->
+    <types>
+        <members>FuruAgent_Knowledge__c.Error_Message__c</members>
+        <members>FuruAgent_Knowledge__c.Last_Cached_At__c</members>
+        <members>FuruAgent_Knowledge__c.Occurrences__c</members>
+        <members>FuruAgent_Knowledge__c.Plain_English_Rule__c</members>
+        <members>FuruAgent_Knowledge__c.Schema_JSON__c</members>
+        <members>FuruAgent_Knowledge__c.Status__c</members>
+        <members>FuruAgent_Knowledge__c.Summary_Fields_JSON__c</members>
+        <members>FuruAgent_Knowledge__c.Target_sObject__c</members>
+        <members>FuruAgent_Knowledge__c.Trigger_Field__c</members>
+        <!-- Custom Fields on FlashBar_Nav_Item__c -->
+        <members>FlashBar_Nav_Item__c.Label__c</members>
+        <members>FlashBar_Nav_Item__c.User__c</members>
+        <members>FlashBar_Nav_Item__c.Target_Type__c</members>
+        <members>FlashBar_Nav_Item__c.Target_SOQL_Filter__c</members>
+        <members>FlashBar_Nav_Item__c.Target_URL_Page__c</members>
+        <members>FlashBar_Nav_Item__c.Icon_Name__c</members>
+        <members>FlashBar_Nav_Item__c.Sort_Order__c</members>
+        <name>CustomField</name>
+    </types>
+
+    <!-- Lightning Message Channel -->
+    <types>
+        <members>FuruAgentMessage</members>
+        <name>LightningMessageChannel</name>
+    </types>
+
+    <!-- Named Credential -->
+    <types>
+        <members>FuruAgent_Backend</members>
+        <name>NamedCredential</name>
+    </types>
+
+    <!-- Remote Site Setting -->
+    <types>
+        <members>FuruAgent_Backend</members>
+        <name>RemoteSiteSetting</name>
+    </types>
+
+    <!-- Permission Sets -->
+    <types>
+        <members>FlashBar_Admin</members>
+        <members>FlashBar_User</members>
+        <name>PermissionSet</name>
+    </types>
+
+    <!-- Custom Permission -->
+    <types>
+        <members>FlashBar_Admin_Access</members>
+        <name>CustomPermission</name>
+    </types>
+
+    <!-- Prompt Template (Agentforce / GenAI) -->
+    <types>
+        <members>FlashBar_Document_Extractor</members>
+        <name>GenAiPromptTemplate</name>
+    </types>
+</Package>

@@ -1,0 +1,143 @@
+/* ── Slide-in animation ──────────────────────────────────────────────────────── */
+@keyframes companion-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0);    }
+}
+
+/* ── Card ────────────────────────────────────────────────────────────────────── */
+.companion-card {
+    background:    #272722;
+    border:        1px solid #4a3e22;
+    border-left:   3px solid #d4a842;
+    border-radius: 10px;
+    padding:       12px 14px;
+    font-family:   -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    box-shadow:    0 4px 12px rgba(0, 0, 0, 0.25);
+    animation:     companion-in 0.2s ease;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────────── */
+.companion-header {
+    display:       flex;
+    align-items:   center;
+    gap:           6px;
+    margin-bottom: 10px;
+}
+
+.companion-icon  { font-size: 14px; flex-shrink: 0; opacity: 0.8; }
+
+.companion-title {
+    font-size:      11.5px;
+    font-weight:    600;
+    color:          #d4a842;
+    flex:           1;
+    letter-spacing: 0.02em;
+}
+
+.companion-obj {
+    background:    #3f3f38;
+    border-radius: 9999px;
+    color:         #a8a79d;
+    font-size:     9px;
+    font-weight:   500;
+    letter-spacing: 0.04em;
+    padding:       2px 8px;
+    white-space:   nowrap;
+    text-transform: uppercase;
+}
+
+/* ── Field rows ──────────────────────────────────────────────────────────────── */
+.companion-fields {
+    list-style:    none;
+    margin:        0 0 10px;
+    padding:       0;
+}
+
+.companion-field-row {
+    display:       flex;
+    align-items:   baseline;
+    gap:           7px;
+    padding:       5px 0;
+    border-bottom: 1px solid rgba(63, 63, 56, 0.6);
+    font-size:     12px;
+}
+
+.companion-field-row:last-child { border-bottom: none; }
+
+.companion-field-name {
+    color:       #73726a;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size:   10.5px;
+    min-width:   90px;
+    flex-shrink: 0;
+}
+
+.companion-arrow {
+    color:       #d4a842;
+    font-weight: 700;
+    font-size:   12px;
+    flex-shrink: 0;
+}
+
+.companion-field-value {
+    color:       #ecebe4;
+    font-weight: 500;
+    flex:        1;
+    word-break:  break-all;
+}
+
+/* ── Actions ─────────────────────────────────────────────────────────────────── */
+.companion-actions {
+    display:    flex;
+    gap:        8px;
+    margin-top: 2px;
+}
+
+.companion-btn {
+    flex:          1;
+    padding:       5px 0;
+    border:        1px solid #3f3f38;
+    border-radius: 6px;
+    cursor:        pointer;
+    font-size:     11.5px;
+    font-weight:   500;
+    background:    transparent;
+    color:         #a8a79d;
+    transition:    background 0.15s ease, opacity 0.15s ease;
+}
+
+.companion-btn:hover:not(:disabled) {
+    background: #32322c;
+    color:      #ecebe4;
+}
+
+.companion-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.companion-btn--save {
+    background:   #2d2410;
+    border-color: #8a6f20;
+    color:        #f0d080;
+}
+
+.companion-btn--save:hover:not(:disabled) {
+    background:   #3a2f12;
+    border-color: #d4a842;
+}
+
+/* ── Proactive warning ───────────────────────────────────────────────────── */
+.companion-warning {
+    display:       flex;
+    align-items:   flex-start;
+    gap:           7px;
+    margin-bottom: 10px;
+    padding:       7px 9px;
+    background:    #2b2314;
+    border:        1px solid #8a7220;
+    border-radius: 6px;
+    font-size:     11.5px;
+    line-height:   1.4;
+    color:         #fde047;
+}
+
+.companion-warning-icon { flex-shrink: 0; }
+.companion-warning-text { flex: 1; }

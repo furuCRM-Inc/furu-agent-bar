@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">
+    <label>FlashBar AI - Standard User</label>
+    <description>Provides access to use FlashBar AI bar for natural language search, DML operations, OCR, and recent suggestions. No write access to knowledge dictionary objects.</description>
+
+    <!-- FuruAgent_Knowledge__c: read-only for cache lookups (WITH USER_MODE queries in FlashBarSummaryService) -->
+    <objectPermissions>
+        <allowCreate>false</allowCreate>
+        <allowDelete>false</allowDelete>
+        <allowEdit>false</allowEdit>
+        <allowRead>true</allowRead>
+        <modifyAllRecords>false</modifyAllRecords>
+        <object>FuruAgent_Knowledge__c</object>
+        <viewAllRecords>false</viewAllRecords>
+    </objectPermissions>
+
+    <!-- FlashBar_Nav_Item__c: users can create/edit/delete their own nav items only -->
+    <objectPermissions>
+        <allowCreate>true</allowCreate>
+        <allowDelete>true</allowDelete>
+        <allowEdit>true</allowEdit>
+        <allowRead>true</allowRead>
+        <modifyAllRecords>false</modifyAllRecords>
+        <object>FlashBar_Nav_Item__c</object>
+        <viewAllRecords>false</viewAllRecords>
+    </objectPermissions>
+
+    <!-- FlashBar_Nav_Item__c field permissions (all user-editable fields) -->
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>FlashBar_Nav_Item__c.Label__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>FlashBar_Nav_Item__c.User__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>FlashBar_Nav_Item__c.Target_Type__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>FlashBar_Nav_Item__c.Target_SOQL_Filter__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>FlashBar_Nav_Item__c.Target_URL_Page__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>FlashBar_Nav_Item__c.Icon_Name__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>FlashBar_Nav_Item__c.Sort_Order__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+
+    <!-- FuruAgent_Knowledge__c FLS: only the fields accessed WITH USER_MODE in FlashBarSummaryService -->
+    <fieldPermissions>
+        <editable>false</editable>
+        <field>FuruAgent_Knowledge__c.Last_Cached_At__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>false</editable>
+        <field>FuruAgent_Knowledge__c.Summary_Fields_JSON__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <!-- Apex Class Access: core runtime services only -->
+    <classAccesses>
+        <apexClass>FlashBarAdminController</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>FlashBarMassEditService</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>FlashBarNavigationController</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>FlashBarOCRController</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>FlashBarRecentService</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>FlashBarSummaryService</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>FuruAgentController</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+</PermissionSet>

@@ -1,0 +1,188 @@
+<template>
+    <div class="fme-overlay" tabindex="0" onkeydown={handleKeydown}>
+
+        <!-- ── Header ──────────────────────────────────────────────────── -->
+        <div class="fme-header">
+            <span class="fme-header__title">✏️ 一括編集エディタ</span>
+            <span class="fme-header__count">{totalCount} 件</span>
+            <span class="fme-header__spacer"></span>
+            <button class="fme-btn fme-btn--undo"
+                    onclick={handleUndo}
+                    disabled={undoDisabled}
+                    title="元に戻す (Ctrl+Z)"
+                    type="button">↩ Undo</button>
+            <button class="fme-btn fme-btn--redo"
+                    onclick={handleRedo}
+                    disabled={redoDisabled}
+                    title="やり直し (Ctrl+Y)"
+                    type="button">↪ Redo</button>
+            <button class="fme-btn fme-btn--save"
+                    onclick={handleSave}
+                    disabled={saveDisabled}
+                    title="保存"
+                    type="button">{saveLabel}</button>
+            <button class="fme-btn fme-btn--close"
+                    onclick={handleClose}
+                    title="閉じる"
+                    type="button">✕ 閉じる</button>
+        </div>
+
+        <!-- ── Toolbar ─────────────────────────────────────────────────── -->
+        <div class="fme-toolbar">
+            <span class="fme-toolbar__sel">{selectionLabel}</span>
+            <button class="fme-btn fme-btn--bulk"
+                    onclick={handleToggleBulkPanel}
+                    type="button">🔧 一括適用</button>
+            <div class="fme-toolbar__spacer"></div>
+            <input  class="fme-ai-input"
+                    type="text"
+                    placeholder="🤖 AIコマンド例: 10%増加, 来月末"
+                    value={_aiInput}
+                    oninput={handleAiInput}
+                    onkeydown={handleAiKeydown} />
+        </div>
+
+        <!-- ── Bulk Apply Panel ────────────────────────────────────────── -->
+        <template lwc:if={_showBulkPanel}>
+            <div class="fme-bulk-panel">
+                <span class="fme-bulk-panel__label">フィールド:</span>
+                <select class="fme-cell-input fme-bulk-select"
+                        value={_bulkField}
+                        onchange={handleBulkFieldChange}>
+                    <option value="">-- 選択 --</option>
+                    <template for:each={bulkFieldOptions} for:item="opt">
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    </template>
+                </select>
+
+                <template lwc:if={bulkInputIsPicklist}>
+                    <select class="fme-cell-input fme-bulk-value"
+                            onchange={handleBulkValueChange}>
+                        <option value="">-- 選択 --</option>
+                        <template for:each={bulkPicklistOptions} for:item="opt">
+                            <option key={opt.key} value={opt.value}>{opt.label}</option>
+                        </template>
+                    </select>
+                </template>
+                <template lwc:elseif={bulkInputIsCheckbox}>
+                    <input  class="fme-bulk-checkbox"
+                            type="checkbox"
+                            onchange={handleBulkValueChange} />
+                </template>
+                <template lwc:else>
+                    <input  class="fme-cell-input fme-bulk-value"
+                            type={bulkInputType}
+                            placeholder="値を入力"
+                            oninput={handleBulkValueChange} />
+                </template>
+
+                <button class="fme-btn fme-btn--bulk-apply"
+                        onclick={handleBulkApply}
+                        type="button">適用</button>
+            </div>
+        </template>
+
+        <!-- ── Loading overlay ────────────────────────────────────────── -->
+        <template lwc:if={_isLoading}>
+            <div class="fme-loading">
+                <div class="fme-spinner"></div>
+                <span>スキーマ読み込み中...</span>
+            </div>
+        </template>
+
+        <!-- ── Table ──────────────────────────────────────────────────── -->
+        <template lwc:if={tableRows.length}>
+            <div class="fme-table-wrap">
+                <table class="fme-table">
+                    <thead>
+                        <tr>
+                            <th class="fme-th fme-th--check">
+                                <input type="checkbox"
+                                       checked={allChecked}
+                                       onchange={handleSelectAll}
+                                       title="全選択 (Ctrl+A)" />
+                            </th>
+                            <th class="fme-th fme-th--name">名前</th>
+                            <template for:each={schemaColumns} for:item="col">
+                                <th key={col.apiName} class="fme-th">{col.label}</th>
+                            </template>
+                            <th class="fme-th fme-th--act">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template for:each={tableRows} for:item="row">
+                            <tr key={row.key} class={row.rowClass}>
+                                <!-- Checkbox -->
+                                <td class="fme-td fme-td--check">
+                                    <input type="checkbox"
+                                           data-id={row.id}
+                                           checked={row.checked}
+                                           onchange={handleRowCheck} />
+                                </td>
+                                <!-- Name (sticky) -->
+                                <td class="fme-td fme-td--name">{row.name}</td>
+                                <!-- Data cells -->
+                                <template for:each={row.cells} for:item="cell">
+                                    <td key={cell.key} class={cell.cellClass}>
+                                        <template lwc:if={cell.isPicklist}>
+                                            <select class="fme-cell-input"
+                                                    data-id={row.id}
+                                                    data-field={cell.apiName}
+                                                    onchange={handleCellChange}>
+                                                <option value=""></option>
+                                                <template for:each={cell.picklistOptions} for:item="opt">
+                                                    <option key={opt.key}
+                                                            value={opt.value}
+                                                            selected={opt.selected}>{opt.label}</option>
+                                                </template>
+                                            </select>
+                                        </template>
+                                        <template lwc:elseif={cell.isCheckbox}>
+                                            <input  class="fme-cell-checkbox"
+                                                    type="checkbox"
+                                                    data-id={row.id}
+                                                    data-field={cell.apiName}
+                                                    checked={cell.checked}
+                                                    onchange={handleCellChange} />
+                                        </template>
+                                        <template lwc:elseif={cell.isText}>
+                                            <input  class="fme-cell-input"
+                                                    type={cell.inputType}
+                                                    data-id={row.id}
+                                                    data-field={cell.apiName}
+                                                    value={cell.valueStr}
+                                                    onchange={handleCellChange} />
+                                        </template>
+                                        <template lwc:else>
+                                            <span class="fme-cell-readonly">{cell.valueStr}</span>
+                                        </template>
+                                    </td>
+                                </template>
+                                <!-- Action column -->
+                                <td class="fme-td fme-td--act">
+                                    <template lwc:if={row.errorMsg}>
+                                        <span class="fme-row-error-icon" title={row.errorMsg}>⚠️</span>
+                                    </template>
+                                    <button class="fme-btn fme-btn--nav"
+                                            data-id={row.id}
+                                            onclick={handleNavigate}
+                                            title="レコードを開く"
+                                            type="button">↗</button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </template>
+
+        <!-- ── Footer ─────────────────────────────────────────────────── -->
+        <div class="fme-footer">
+            <span class="fme-footer__counts">{totalCount}件 / 変更 {dirtyCount}件</span>
+            <template lwc:if={hasSaveMsg}>
+                <span class={saveMsgClass}>{_saveMsg}</span>
+            </template>
+        </div>
+
+    </div>
+</template>

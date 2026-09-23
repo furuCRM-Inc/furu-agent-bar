@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Plain_English_Rule__c</fullName>
+    <label>Plain English Rule</label>
+    <type>LongTextArea</type>
+    <length>32768</length>
+    <visibleLines>4</visibleLines>
+    <required>false</required>
+    <description>AI-translated plain language explanation of the validation rule. Shown as a proactive warning to users before they attempt a similar action.</description>
+</CustomField>

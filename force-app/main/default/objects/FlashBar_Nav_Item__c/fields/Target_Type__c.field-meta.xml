@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Target_Type__c</fullName>
+    <label>Target Type</label>
+    <type>Picklist</type>
+    <required>true</required>
+    <externalId>false</externalId>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>ListEditor</fullName>
+                <default>true</default>
+                <label>ListEditor (Inline Edit Table)</label>
+            </value>
+            <value>
+                <fullName>Page</fullName>
+                <default>false</default>
+                <label>Page (URL Navigation)</label>
+            </value>
+            <value>
+                <fullName>Report</fullName>
+                <default>false</default>
+                <label>Report</label>
+            </value>
+            <value>
+                <fullName>AI_Prompt</fullName>
+                <default>false</default>
+                <label>AI Prompt</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>

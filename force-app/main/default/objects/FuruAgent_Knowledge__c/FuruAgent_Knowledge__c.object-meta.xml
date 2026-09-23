@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomObject xmlns="http://soap.sforce.com/2006/04/metadata">
+    <label>furuAgent Knowledge</label>
+    <pluralLabel>furuAgent Knowledge</pluralLabel>
+    <nameField>
+        <label>Rule ID</label>
+        <type>AutoNumber</type>
+        <displayFormat>FKB-{0000}</displayFormat>
+    </nameField>
+    <deploymentStatus>Deployed</deploymentStatus>
+    <sharingModel>ReadWrite</sharingModel>
+    <description>Self-learned validation rules captured from runtime DML failures. Populated automatically as reps encounter validation errors; translated to plain English by AI for proactive guidance.</description>
+</CustomObject>

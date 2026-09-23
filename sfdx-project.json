@@ -4,8 +4,10 @@
       "path": "force-app",
       "default": true,
       "package": "FuruAgentBar",
-      "versionName": "v1.0 — Navigate, Fill, Update, Search",
-      "versionNumber": "1.0.0.NEXT"
+      "versionName": "v1.0 — AI-Powered SOQL Search, Inline Edit, Data Cloud & CSV",
+      "versionNumber": "1.0.0.1",
+      "releaseNotesUrl": "https://github.com/furuCRM-Inc/furu-agent-bar/releases/tag/v1.0.0",
+      "postInstallUrl": "https://furucrm.com/furu-agent-bar/setup"
     }
   ],
   "name": "furu-agent-bar",

@@ -12,7 +12,7 @@ export default defineConfig({
     storageState:  'tests/e2e/.auth/sfState.json',
     screenshot:    'only-on-failure',
     video:         'retain-on-failure',
-    trace:         'retain-on-failure',
+    trace:         'on-first-retry',
     actionTimeout: 45_000,
     navigationTimeout: 90_000,
   },

@@ -1,0 +1,48 @@
+<template>
+    <template lwc:if={hasPending}>
+        <div class="companion-card">
+
+            <!-- Header -->
+            <div class="companion-header">
+                <span class="companion-icon">⚡</span>
+                <span class="companion-title">furuAgent — Pending Changes</span>
+                <span class="companion-obj">{sObjectLabel}</span>
+            </div>
+
+            <!-- Proactive warning (missing required fields) -->
+            <template lwc:if={warningMessage}>
+                <div class="companion-warning">
+                    <span class="companion-warning-icon">⚠️</span>
+                    <span class="companion-warning-text">{warningMessage}</span>
+                </div>
+            </template>
+
+            <!-- Field preview rows -->
+            <ul class="companion-fields">
+                <template for:each={pendingItems} for:item="item">
+                    <li key={item.apiName} class="companion-field-row">
+                        <span class="companion-field-name">{item.apiName}</span>
+                        <span class="companion-arrow">→</span>
+                        <span class="companion-field-value">{item.displayValue}</span>
+                    </li>
+                </template>
+            </ul>
+
+            <!-- Actions -->
+            <div class="companion-actions">
+                <button
+                    class="companion-btn companion-btn--save"
+                    onclick={handleSave}
+                    disabled={isSaving}
+                >
+                    <template lwc:if={isSaving}>Saving…</template>
+                    <template lwc:else>✓ Save</template>
+                </button>
+                <button class="companion-btn" onclick={handleDiscard} disabled={isSaving}>
+                    Discard
+                </button>
+            </div>
+
+        </div>
+    </template>
+</template>

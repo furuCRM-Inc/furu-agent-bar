@@ -1323,8 +1323,10 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         const r = this.pendingRule;
         if (!r) return '';
         if (r.ruleText) return r.ruleText;
-        if (r.triggerField) return `${r.sObjectType} の「${r.triggerField}」フィールドに関するルール（詳細翻訳中）`;
+        if (r.triggerField) return `${r.sObjectType ?? ''} の「${r.triggerField}」フィールドに関するルール（詳細翻訳中）`;
         if (r.errorMessage) return r.errorMessage;
+        // Last-resort: show the sObject name so admins know which object the rule targets
+        if (r.sObjectType) return `${r.sObjectType} に関する入力ルール（内容が設定されていません。✏️ 編集ボタンで内容を設定してください）`;
         return '（ルール内容未設定）';
     }
     get pendingRuleCount()  { return this._pendingRules.length; }

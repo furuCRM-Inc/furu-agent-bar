@@ -71,6 +71,78 @@ test.describe('SOQL Smart Search', () => {
     expect(navBtns).toBeGreaterThan(0);
   });
 
+  test('コマンド button injects record name into textarea', async ({ page }) => {
+    // Card view is the default after loadAccountsViaShortcut.
+    // The first card's 📝 コマンド button has data-cmd="「RecordName」".
+    // Clicking it must set that value in the textarea.
+    const result = await page.evaluate(() => {
+      const b    = document.querySelector('c-furu-agent-bar');
+      const root = (b as HTMLElement)?.shadowRoot ?? b!;
+      // Find the command-inject button (has data-cmd attribute, not the nav button)
+      const cmdBtn = root.querySelector(
+        '.furu-bar__soql-card-actions .furu-bar__soql-act-btn[data-cmd]'
+      ) as HTMLButtonElement | null;
+      if (!cmdBtn) return { found: false, cmd: '', textareaValue: '' };
+      const cmd = cmdBtn.dataset.cmd ?? '';
+      cmdBtn.click();
+      const ta = root.querySelector('.furu-bar__textarea') as HTMLTextAreaElement | null;
+      return { found: true, cmd, textareaValue: ta?.value ?? '' };
+    });
+
+    expect(result.found).toBe(true);
+    // Textarea must contain the injected command string (「...」 or "...")
+    expect(result.textareaValue).toBe(result.cmd);
+    expect(result.textareaValue).toMatch(/「.+」|".+"/);
+  });
+
+  test('↗ 開く button in card view has a valid Salesforce record ID', async ({ page }) => {
+    // The navigate button carries data-id with the Salesforce record Id (15 or 18 chars).
+    const navBtnId = await page.evaluate(() => {
+      const b    = document.querySelector('c-furu-agent-bar');
+      const root = (b as HTMLElement)?.shadowRoot ?? b!;
+      const navBtn = root.querySelector(
+        '.furu-bar__soql-card-actions .furu-bar__soql-act-btn--nav'
+      ) as HTMLButtonElement | null;
+      return navBtn?.dataset.id ?? null;
+    });
+
+    expect(navBtnId).not.toBeNull();
+    // Salesforce record IDs are 15 or 18 alphanumeric characters
+    expect(navBtnId).toMatch(/^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/);
+  });
+
+  test('↗ 開く button click does not throw an error', async ({ page }) => {
+    // Clicking navigate calls NavigationMixin.Navigate — which in a test org redirects
+    // within Lightning. Verify no error status appears after clicking.
+    const errorBefore = await page.evaluate(() => {
+      const b    = document.querySelector('c-furu-agent-bar');
+      const root = (b as HTMLElement)?.shadowRoot ?? b!;
+      return !!root.querySelector('.furu-bar__status--error');
+    });
+
+    await page.evaluate(() => {
+      const b    = document.querySelector('c-furu-agent-bar');
+      const root = (b as HTMLElement)?.shadowRoot ?? b!;
+      const navBtn = root.querySelector(
+        '.furu-bar__soql-card-actions .furu-bar__soql-act-btn--nav'
+      ) as HTMLButtonElement | null;
+      navBtn?.click();
+    });
+
+    await page.waitForTimeout(2_000);
+
+    const errorAfter = await page.evaluate(() => {
+      const b    = document.querySelector('c-furu-agent-bar');
+      const root = (b as HTMLElement)?.shadowRoot ?? b!;
+      return !!root.querySelector('.furu-bar__status--error');
+    });
+
+    // Clicking navigate should not produce a new error (it may already be false)
+    if (!errorBefore) {
+      expect(errorAfter).toBe(false);
+    }
+  });
+
   test('dismiss (✕) clears SOQL results', async ({ page }) => {
     await page.evaluate(() => {
       const bar = document.querySelector('c-furu-agent-bar');

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Last_Cached_At__c</fullName>
+    <label>Last Cached At</label>
+    <type>DateTime</type>
+    <description>Timestamp of the last schema metadata refresh written by FlashBarSchemaCacheService. Records with Target_sObject__c starting with __CACHE__: use this for TTL (24-hour) decisions.</description>
+</CustomField>

@@ -1962,6 +1962,69 @@
 .furu-bar__soql-tr:hover .furu-bar__soql-td { background: var(--bg-hover); }
 .furu-bar__soql-tr:hover .furu-bar__soql-td--sticky { background: var(--bg-hover); }
 
+/* Inline edit mode — dirty cell */
+.furu-bar__soql-td--dirty {
+    background:   rgba(251, 191, 36, 0.10) !important;
+    border-bottom-color: rgba(251, 191, 36, 0.35) !important;
+}
+
+/* Row-level save/error feedback */
+.furu-bar__soql-tr--saved .furu-bar__soql-td {
+    background: rgba(110, 231, 183, 0.07) !important;
+}
+.furu-bar__soql-tr--error .furu-bar__soql-td {
+    background: rgba(252, 165, 165, 0.08) !important;
+}
+
+/* Cell inputs */
+.furu-bar__cell-input {
+    background:    var(--bg-primary);
+    border:        1px solid var(--border-color);
+    border-radius: 3px;
+    color:         var(--text-primary);
+    font-size:     10px;
+    padding:       2px 5px;
+    width:         100%;
+    min-width:     60px;
+    max-width:     160px;
+    box-sizing:    border-box;
+    line-height:   1.4;
+}
+.furu-bar__cell-input:focus {
+    border-color: var(--border-focus);
+    outline:      none;
+}
+.furu-bar__cell-check {
+    cursor:       pointer;
+    accent-color: var(--border-focus);
+}
+
+/* Edit mode toolbar extras */
+.furu-bar__soql-act-btn--primary {
+    background:   rgba(217, 119, 87, 0.15);
+    border-color: var(--border-focus);
+    color:        var(--border-focus);
+}
+.furu-bar__soql-act-btn--primary:hover {
+    background: rgba(217, 119, 87, 0.28);
+}
+.furu-bar__soql-act-btn--primary:disabled {
+    opacity: 0.4;
+    cursor:  default;
+    pointer-events: none;
+}
+.furu-bar__soql-act-btn--active {
+    background:   rgba(93, 93, 80, 0.25);
+    border-color: var(--text-secondary);
+    color:        var(--text-secondary);
+}
+.furu-bar__soql-dirty-badge {
+    font-size:  10px;
+    color:      #fbbf24;
+    padding:    0 4px;
+    flex-shrink: 0;
+}
+
 /* ── Personal Search Shortcuts ──────────────────────────────────────── */
 .furu-bar__shortcuts {
     padding:       6px 10px;
@@ -2258,8 +2321,325 @@
     white-space:   nowrap;
 }
 
+.furu-bar__summary-check-value {
+    max-width:     120px;
+    overflow:      hidden;
+    text-overflow: ellipsis;
+    white-space:   nowrap;
+    font-size:     0.72rem;
+    color:         var(--text-muted, rgba(255,255,255,0.45));
+    margin-left:   4px;
+    flex-shrink:   0;
+}
+
 .furu-bar__summary-edit-actions {
     display:    flex;
     gap:        6px;
     margin-top: 2px;
+}
+
+/* ── Claude OAuth settings section ─────────────────────────────────────── */
+.furu-bar__modal-claude {
+    margin-top:    16px;
+    padding:       12px;
+    border-top:    1px solid var(--border-color);
+}
+.furu-bar__modal-claude-title {
+    font-size:     12px;
+    font-weight:   600;
+    color:         var(--text-primary);
+    margin-bottom: 6px;
+}
+.furu-bar__modal-claude-hint {
+    font-size:     11px;
+    color:         var(--text-secondary);
+    margin-bottom: 10px;
+    line-height:   1.5;
+}
+.furu-bar__claude-status {
+    font-size:     12px;
+    margin-bottom: 8px;
+}
+.furu-bar__claude-status--connected {
+    color: var(--status-success-text);
+}
+.furu-bar__action-btn--claude {
+    background:    #d97757;
+    color:         #fff;
+    border-color:  #c86a44;
+}
+.furu-bar__action-btn--claude:hover {
+    background:    #c86a44;
+}
+.furu-bar__action-btn--muted {
+    background:    transparent;
+    color:         var(--text-secondary);
+    border-color:  var(--border-color);
+    font-size:     11px;
+}
+.furu-bar__claude-key-row {
+    display:       flex;
+    gap:           6px;
+    align-items:   center;
+}
+.furu-bar__claude-key-input {
+    flex:          1;
+    font-size:     11px;
+    padding:       5px 8px;
+    border:        1px solid var(--border-color);
+    border-radius: 4px;
+    background:    var(--bg-primary);
+    color:         var(--text-primary);
+    font-family:   monospace;
+    min-width:     0;
+}
+.furu-bar__claude-key-input:focus {
+    outline:       none;
+    border-color:  #d97757;
+}
+
+/* ── Analytics creating state ──────────────────────────────────────────── */
+.furu-bar__analytics-creating {
+    display:         flex;
+    flex-direction:  column;
+    align-items:     center;
+    gap:             10px;
+    padding:         20px 12px;
+    background:      var(--bg-secondary);
+    border-radius:   8px;
+    margin-bottom:   8px;
+}
+.furu-bar__analytics-creating-label {
+    font-size:   12px;
+    color:       var(--text-secondary);
+    text-align:  center;
+    margin:      0;
+}
+.furu-bar__spinner--large {
+    width:    28px;
+    height:   28px;
+    border-width: 3px;
+}
+
+/* ── Analytics result card ─────────────────────────────────────────────── */
+.furu-bar__analytics-result {
+    background:    var(--bg-secondary);
+    border:        1px solid var(--border-color);
+    border-radius: 8px;
+    overflow:      hidden;
+    margin-bottom: 8px;
+}
+.furu-bar__analytics-result-header {
+    display:         flex;
+    align-items:     center;
+    justify-content: space-between;
+    padding:         10px 12px 8px;
+    border-bottom:   1px solid var(--border-color);
+}
+.furu-bar__analytics-result-title {
+    font-size:   13px;
+    font-weight: 600;
+    color:       var(--text-primary);
+}
+.furu-bar__analytics-dismiss {
+    background:  transparent;
+    border:      none;
+    color:       var(--text-secondary);
+    cursor:      pointer;
+    padding:     0 2px;
+    font-size:   14px;
+    line-height: 1;
+}
+.furu-bar__analytics-result-body {
+    padding: 8px 12px 4px;
+}
+.furu-bar__analytics-name {
+    font-size:     12px;
+    color:         var(--text-secondary);
+    margin:        0 0 4px;
+    overflow:      hidden;
+    text-overflow: ellipsis;
+    white-space:   nowrap;
+}
+.furu-bar__analytics-result-actions {
+    display:  flex;
+    flex-wrap: wrap;
+    gap:       6px;
+    padding:   8px 12px 12px;
+}
+
+/* ── Smart Suggestions panel ─────────────────────────────────────────── */
+.furu-bar__suggestions {
+    margin:  4px 8px;
+    display: flex;
+    flex-direction: column;
+    gap:     6px;
+}
+
+.furu-bar__sug-row {
+    display:        flex;
+    flex-direction: column;
+    gap:            4px;
+}
+
+.furu-bar__sug-label {
+    font-size:      9.5px;
+    font-weight:    600;
+    color:          var(--text-secondary);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding:        0 2px;
+}
+
+.furu-bar__sug-chips {
+    display:   flex;
+    flex-wrap: wrap;
+    gap:       5px;
+}
+
+.furu-bar__sug-chip {
+    display:       inline-flex;
+    align-items:   center;
+    gap:           3px;
+    font-size:     10.5px;
+    font-family:   var(--font-family);
+    padding:       3px 9px;
+    border-radius: var(--radius-pill);
+    border:        1px solid var(--border-color);
+    background:    var(--bg-secondary);
+    color:         var(--text-primary);
+    cursor:        pointer;
+    transition:    background var(--transition-fast), border-color var(--transition-fast);
+    white-space:   nowrap;
+    max-width:     160px;
+    overflow:      hidden;
+    text-overflow: ellipsis;
+}
+
+.furu-bar__sug-chip:hover {
+    background:   var(--bg-hover);
+    border-color: var(--border-focus);
+}
+
+.furu-bar__sug-chip--record {
+    border-color: rgba(99,102,241,0.35);
+    color:        #c7d2fe;
+}
+
+.furu-bar__sug-chip--prompt {
+    border-color: rgba(217,119,87,0.35);
+    color:        #fdba74;
+}
+
+/* ── Navigation Hub ─────────────────────────────────────────────────── */
+.furu-bar__nav-hub {
+    padding:    6px 12px 4px;
+    border-top: 1px solid rgba(63,63,56,0.4);
+}
+
+.furu-bar__nav-hub-label {
+    font-size:     10px;
+    color:         var(--text-secondary);
+    margin-bottom: 5px;
+    font-weight:   600;
+    letter-spacing: 0.02em;
+}
+
+.furu-bar__nav-hub-items {
+    display:   flex;
+    flex-wrap: wrap;
+    gap:       4px;
+}
+
+.furu-bar__nav-item {
+    display:     flex;
+    align-items: center;
+    gap:         0;
+}
+
+.furu-bar__nav-item-btn {
+    display:       flex;
+    align-items:   center;
+    gap:           4px;
+    background:    rgba(63,63,56,0.25);
+    border:        1px solid var(--border-color);
+    border-right:  none;
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+    color:         var(--text-primary);
+    font-size:     11px;
+    padding:       4px 8px;
+    cursor:        pointer;
+    transition:    all var(--transition-fast);
+    max-width:     180px;
+    white-space:   nowrap;
+    overflow:      hidden;
+}
+.furu-bar__nav-item-btn:hover {
+    background:   rgba(217,119,87,0.12);
+    border-color: var(--border-focus);
+    color:        var(--border-focus);
+}
+
+.furu-bar__nav-item-icon { flex-shrink: 0; }
+.furu-bar__nav-item-label {
+    overflow:      hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+}
+.furu-bar__nav-item-type {
+    flex-shrink: 0;
+    font-size:   9px;
+    opacity:     0.6;
+}
+
+.furu-bar__nav-item-del {
+    background:    rgba(63,63,56,0.25);
+    border:        1px solid var(--border-color);
+    border-left:   none;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    color:         var(--text-secondary);
+    font-size:     9px;
+    padding:       4px 5px;
+    cursor:        pointer;
+    transition:    all var(--transition-fast);
+    line-height:   1;
+}
+.furu-bar__nav-item-del:hover {
+    background:   rgba(239,68,68,0.15);
+    border-color: rgba(239,68,68,0.5);
+    color:        #fca5a5;
+}
+
+/* ── Pin Dialog ─────────────────────────────────────────────────────── */
+.furu-bar__pin-dialog {
+    padding:       8px 12px;
+    border-top:    1px solid rgba(63,63,56,0.4);
+    background:    var(--bg-secondary);
+}
+
+.furu-bar__pin-dialog-label {
+    font-size:     11px;
+    color:         var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.furu-bar__pin-input {
+    width:         100%;
+    background:    var(--bg-primary);
+    border:        1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color:         var(--text-primary);
+    font-size:     11px;
+    padding:       5px 8px;
+    box-sizing:    border-box;
+    margin-bottom: 6px;
+}
+.furu-bar__pin-input:focus {
+    border-color: var(--border-focus);
+    outline:      none;
+}
+
+.furu-bar__pin-dialog-actions {
+    display: flex;
+    gap:     6px;
 }

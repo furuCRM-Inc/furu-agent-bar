@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomPermission xmlns="http://soap.sforce.com/2006/04/metadata">
+    <label>FlashBar Admin Access</label>
+    <description>Grants access to FlashBar AI administrative features: rule approval, schema cache refresh, Claude configuration, and report deployment. Checked via FeatureManagement.checkPermission in Apex and @salesforce/customPermission in LWC.</description>
+</CustomPermission>

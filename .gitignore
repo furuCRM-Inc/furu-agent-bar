@@ -1,0 +1,27 @@
+# Secrets & credentials
+.env
+tests/e2e/.auth/
+
+# Salesforce local state
+.sfdx/
+.sf/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Playwright artifacts
+playwright-report/
+test-results/
+*.zip
+
+# IDE
+.vscode/
+.idea/
+
+# rtk-sf index (local tooling)
+.rtk-sf/
+
+# OS
+.DS_Store
+Thumbs.db

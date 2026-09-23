@@ -90,13 +90,15 @@ public with sharing class FlashBarSummaryService {
             String apiName = fr.getName();
             String typeStr = String.valueOf(fr.getType());
             if (fr.isDeprecatedAndHidden()) continue;
+            if (!fr.isAccessible()) continue;
             if (SYSTEM_FIELDS.contains(apiName.toLowerCase())) continue;
             if (EXCLUDE_TYPES.contains(typeStr)) continue;
             SummaryField f = new SummaryField();
             f.apiName    = apiName;
             f.label      = fr.getLabel();
             f.fieldType  = typeStr;
-            f.isRequired = !fr.isNillable() && !fr.isDefaultedOnCreate() && fr.isCreateable();
+            f.isRequired = fr.isNameField()
+                || (!fr.isNillable() && !fr.isDefaultedOnCreate() && fr.isCreateable());
             f.isChecked  = selected.contains(apiName);
             out.add(f);
         }
@@ -143,8 +145,9 @@ public with sharing class FlashBarSummaryService {
                 && String.isNotBlank(recs[0].Summary_Fields_JSON__c)
                 && recs[0].Last_Cached_At__c != null
                 && recs[0].Last_Cached_At__c.addHours(CACHE_TTL_HOURS) > DateTime.now()) {
-                return (List<SummaryField>) JSON.deserialize(
+                List<SummaryField> cached = (List<SummaryField>) JSON.deserialize(
                     recs[0].Summary_Fields_JSON__c, List<SummaryField>.class);
+                if (!cached.isEmpty()) return cached;
             }
         } catch (Exception ignored) {}
 
@@ -168,10 +171,14 @@ public with sharing class FlashBarSummaryService {
             String typeStr = String.valueOf(fr.getType());
 
             if (fr.isDeprecatedAndHidden()) continue;
+            if (!fr.isAccessible()) continue;
             if (SYSTEM_FIELDS.contains(apiName.toLowerCase())) continue;
             if (EXCLUDE_TYPES.contains(typeStr)) continue;
 
-            Boolean isReq = !fr.isNillable() && !fr.isDefaultedOnCreate() && fr.isCreateable();
+            // isNameField() ensures Name always appears even for read-only users;
+            // isCreateable() gates other required fields to exclude rollup/formula fields.
+            Boolean isReq = fr.isNameField()
+                || (!fr.isNillable() && !fr.isDefaultedOnCreate() && fr.isCreateable());
             SummaryField f = new SummaryField();
             f.apiName    = apiName;
             f.label      = fr.getLabel();
@@ -180,7 +187,7 @@ public with sharing class FlashBarSummaryService {
 
             if (isReq) {
                 required.add(f);
-            } else if (HIGH_VALUE_TYPES.contains(typeStr) && (fr.isUpdateable() || fr.isCreateable())) {
+            } else if (HIGH_VALUE_TYPES.contains(typeStr)) {
                 optional.add(f);
             }
         }
