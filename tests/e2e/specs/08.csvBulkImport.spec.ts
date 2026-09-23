@@ -247,13 +247,15 @@ test.describe('CSV Bulk Import', () => {
       return !!(a?.href?.startsWith('data:'));
     }, { timeout: 120_000 });
 
-    // Decode the base64 data URI directly in the browser — no file save needed
+    // Decode the base64 data URI in the browser.
+    // LWC encodes with btoa(unescape(encodeURIComponent(csv))), so reverse with
+    // decodeURIComponent(escape(atob(b64))) to correctly handle UTF-8 (Japanese column names).
     const csvText = await page.evaluate(() => {
       const bar = document.querySelector('c-furu-agent-bar');
       const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
       const href = (root.querySelector('a[download]') as HTMLAnchorElement)?.href ?? '';
       const b64 = href.split(',')[1];
-      return b64 ? atob(b64) : '';
+      return b64 ? decodeURIComponent(escape(atob(b64))) : '';
     });
 
     const content = csvText.replace(/^﻿/, ''); // strip BOM
