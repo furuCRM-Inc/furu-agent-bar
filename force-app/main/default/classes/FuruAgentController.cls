@@ -143,8 +143,13 @@ public with sharing class FuruAgentController {
         String  fieldApiName;
         String  parentSObject;
         String  nameValue;
+        String  extKeyField;   // null → lookup by Name; non-null → lookup by this field
         PendingLookup(Integer idx, String f, String s, String n) {
-            recIndex = idx; fieldApiName = f; parentSObject = s; nameValue = n;
+            recIndex = idx; fieldApiName = f; parentSObject = s; nameValue = n; extKeyField = null;
+        }
+        // Constructor for dotted-header parent lookup (Account.AccountNumber → resolve AccountId)
+        PendingLookup(Integer idx, String fk, String s, String ekf, String ekv) {
+            recIndex = idx; fieldApiName = fk; parentSObject = s; extKeyField = ekf; nameValue = ekv;
         }
     }
 
@@ -197,12 +202,28 @@ public with sharing class FuruAgentController {
             List<PendingLookup> rowPending = new List<PendingLookup>();
 
             for (String apiName : r.keySet()) {
-                Schema.SObjectField sf = fieldMap.get(apiName.toLowerCase());
-                if (sf == null) continue;
                 Object raw = r.get(apiName);
                 if (raw == null) continue;
                 String strVal = String.valueOf(raw).trim();
                 if (String.isBlank(strVal)) continue;
+
+                // Dotted-header: "Account.AccountNumber" → resolve AccountId by AccountNumber value
+                if (apiName.contains('.')) {
+                    String relPart   = apiName.substringBefore('.').toLowerCase();
+                    String extKeyFld = apiName.substringAfter('.');
+                    String fkApiName = findWritableFkField(relPart, fieldMap);
+                    if (String.isNotBlank(fkApiName)) {
+                        Schema.DescribeFieldResult dfr = fieldMap.get(fkApiName.toLowerCase()).getDescribe();
+                        if (!dfr.getReferenceTo().isEmpty()) {
+                            String parentSObj = dfr.getReferenceTo()[0].getDescribe().getName();
+                            rowPending.add(new PendingLookup(-1, fkApiName, parentSObj, extKeyFld, strVal));
+                        }
+                    }
+                    continue;
+                }
+
+                Schema.SObjectField sf = fieldMap.get(apiName.toLowerCase());
+                if (sf == null) continue;
 
                 try {
                     Schema.DisplayType dt = sf.getDescribe().getType();
@@ -264,33 +285,42 @@ public with sharing class FuruAgentController {
             }
         }
 
-        // ── Batch-resolve REFERENCE names → Salesforce IDs ───────────────────
+        // ── Batch-resolve REFERENCE values → Salesforce IDs ─────────────────
+        // Groups by "ParentSObj|LookupField" so Name-based and external-key-based
+        // lookups are batched separately and never collide in the result map.
         if (!pendingLookups.isEmpty()) {
-            // Group lookup names by parent sObject
-            Map<String, Set<String>> namesByParent = new Map<String, Set<String>>();
+            Map<String, Set<String>> valuesByKey = new Map<String, Set<String>>();
             for (PendingLookup lp : pendingLookups) {
-                if (!namesByParent.containsKey(lp.parentSObject)) {
-                    namesByParent.put(lp.parentSObject, new Set<String>());
+                String lookupFld = lp.extKeyField != null ? lp.extKeyField : 'Name';
+                String key = lp.parentSObject + '|' + lookupFld;
+                if (!valuesByKey.containsKey(key)) {
+                    valuesByKey.put(key, new Set<String>());
                 }
-                namesByParent.get(lp.parentSObject).add(lp.nameValue);
+                valuesByKey.get(key).add(lp.nameValue);
             }
 
-            Map<String, Id> nameToId = new Map<String, Id>();
-            for (String parentSObj : namesByParent.keySet()) {
-                Set<String> names = namesByParent.get(parentSObj);
+            // resolvedMap key = "Account|AccountNumber:ACC-001" → Id
+            Map<String, Id> resolvedMap = new Map<String, Id>();
+            for (String key : valuesByKey.keySet()) {
+                String parentSObj = key.substringBefore('|');
+                String lookupFld  = key.substringAfter('|');
+                Set<String> vals  = valuesByKey.get(key);
                 try {
-                    String sobjSafe = String.escapeSingleQuotes(parentSObj);
+                    String sobjSafe  = String.escapeSingleQuotes(parentSObj);
+                    String fieldSafe = String.escapeSingleQuotes(lookupFld);
                     List<SObject> parents = Database.query(
-                        'SELECT Id, Name FROM ' + sobjSafe + ' WHERE Name IN :names WITH USER_MODE LIMIT 200'
+                        'SELECT Id, ' + fieldSafe + ' FROM ' + sobjSafe +
+                        ' WHERE ' + fieldSafe + ' IN :vals WITH USER_MODE LIMIT 200'
                     );
                     for (SObject p : parents) {
-                        nameToId.put(String.valueOf(p.get('Name')), (Id) p.get('Id'));
+                        resolvedMap.put(key + ':' + String.valueOf(p.get(lookupFld)), (Id) p.get('Id'));
                     }
                 } catch (Exception ignored) {}
             }
 
             for (PendingLookup lp : pendingLookups) {
-                Id resolved = nameToId.get(lp.nameValue);
+                String lookupFld = lp.extKeyField != null ? lp.extKeyField : 'Name';
+                Id resolved = resolvedMap.get(lp.parentSObject + '|' + lookupFld + ':' + lp.nameValue);
                 if (resolved != null && lp.recIndex < toSave.size()) {
                     toSave[lp.recIndex].put(lp.fieldApiName, resolved);
                 }

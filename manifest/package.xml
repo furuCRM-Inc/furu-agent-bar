@@ -44,6 +44,8 @@
         <members>FuruAgent_Knowledge__c.Summary_Fields_JSON__c</members>
         <members>FuruAgent_Knowledge__c.Target_sObject__c</members>
         <members>FuruAgent_Knowledge__c.Trigger_Field__c</members>
+        <!-- Custom External ID field on Contact (for CSV upsert) -->
+        <members>Contact.CSV_External_Key__c</members>
         <!-- Custom Fields on FlashBar_Nav_Item__c -->
         <members>FlashBar_Nav_Item__c.Label__c</members>
         <members>FlashBar_Nav_Item__c.User__c</members>

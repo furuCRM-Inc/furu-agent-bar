@@ -311,4 +311,132 @@ private class FuruAgentControllerTest {
         System.assertEquals('スナップショットテスト株式会社', snap.get('Name'), 'Name must match');
         System.assertEquals('Technology', snap.get('Industry'), 'Industry must match');
     }
+
+    // ── bulkImportCsv — parent lookup by Name ────────────────────────────────
+
+    @IsTest
+    static void testBulkImport_parentResolutionByName() {
+        Account parent = new Account(Name = 'E2E_BulkImport_Parent_ByName');
+        insert parent;
+
+        // AccountId column holds the Account Name (non-ID string) → resolved by Name lookup
+        String json = JSON.serialize(new List<Map<String, Object>>{
+            new Map<String, Object>{
+                'LastName'  => 'E2E_ChildByName',
+                'FirstName' => 'Test',
+                'AccountId' => 'E2E_BulkImport_Parent_ByName'
+            }
+        });
+
+        Test.startTest();
+        FuruAgentController.BulkImportResult res =
+            FuruAgentController.bulkImportCsv('Contact', json, null);
+        Test.stopTest();
+
+        System.assertEquals(1, res.totalInserted, 'One Contact must be inserted');
+        System.assertEquals(0, res.totalFailed,   'No failures expected');
+
+        Contact c = [SELECT AccountId FROM Contact WHERE LastName = 'E2E_ChildByName' LIMIT 1];
+        System.assertEquals(parent.Id, c.AccountId, 'AccountId must be resolved from parent Name');
+    }
+
+    // ── bulkImportCsv — parent lookup by external key (dotted-header) ────────
+
+    @IsTest
+    static void testBulkImport_parentResolutionByExternalKey() {
+        Account parent = new Account(Name = 'E2E_BulkImport_Parent_ByExtKey', AccountNumber = 'EXT-ACC-001');
+        insert parent;
+
+        // Column "Account.AccountNumber" → look up Account WHERE AccountNumber = 'EXT-ACC-001'
+        String json = JSON.serialize(new List<Map<String, Object>>{
+            new Map<String, Object>{
+                'LastName'           => 'E2E_ChildByExtKey',
+                'FirstName'         => 'Test',
+                'Account.AccountNumber' => 'EXT-ACC-001'
+            }
+        });
+
+        Test.startTest();
+        FuruAgentController.BulkImportResult res =
+            FuruAgentController.bulkImportCsv('Contact', json, null);
+        Test.stopTest();
+
+        System.assertEquals(1, res.totalInserted, 'One Contact must be inserted');
+        System.assertEquals(0, res.totalFailed,   'No failures expected');
+
+        Contact c = [SELECT AccountId FROM Contact WHERE LastName = 'E2E_ChildByExtKey' LIMIT 1];
+        System.assertEquals(parent.Id, c.AccountId,
+            'AccountId must be resolved from parent AccountNumber (external key)');
+    }
+
+    // ── bulkImportCsv — child upsert by own external key ─────────────────────
+
+    @IsTest
+    static void testBulkImport_childUpsertByExternalKey_createThenUpdate() {
+        // First call: creates Contact with CSV_External_Key__c = 'CEXT-001'
+        String json1 = JSON.serialize(new List<Map<String, Object>>{
+            new Map<String, Object>{
+                'LastName'           => 'E2E_Upsert_Created',
+                'FirstName'         => 'Test',
+                'CSV_External_Key__c' => 'CEXT-001'
+            }
+        });
+
+        Test.startTest();
+        FuruAgentController.BulkImportResult r1 =
+            FuruAgentController.bulkImportCsv('Contact', json1, 'CSV_External_Key__c');
+        System.assertEquals(1, r1.totalInserted, 'First call must create one Contact');
+        System.assertEquals(0, r1.totalFailed,   'No failures on create');
+        System.assertEquals(0, r1.totalUpserted, 'isCreated=true → totalUpserted stays 0');
+
+        // Second call with same key: updates the existing Contact
+        String json2 = JSON.serialize(new List<Map<String, Object>>{
+            new Map<String, Object>{
+                'LastName'           => 'E2E_Upsert_Updated',
+                'FirstName'         => 'Test',
+                'CSV_External_Key__c' => 'CEXT-001'
+            }
+        });
+        FuruAgentController.BulkImportResult r2 =
+            FuruAgentController.bulkImportCsv('Contact', json2, 'CSV_External_Key__c');
+        Test.stopTest();
+
+        System.assertEquals(1, r2.totalInserted, 'Second call counts as one success');
+        System.assertEquals(0, r2.totalFailed,   'No failures on update');
+        System.assertEquals(1, r2.totalUpserted, 'isCreated=false → totalUpserted increments');
+
+        Contact updated = [SELECT LastName FROM Contact WHERE CSV_External_Key__c = 'CEXT-001' LIMIT 1];
+        System.assertEquals('E2E_Upsert_Updated', updated.LastName, 'LastName must reflect the update');
+    }
+
+    // ── bulkImportCsv — combined: child upsert + parent by external key ───────
+
+    @IsTest
+    static void testBulkImport_childUpsert_withParentExternalKey() {
+        Account parent = new Account(Name = 'E2E_BulkImport_Combined', AccountNumber = 'EXT-ACC-002');
+        insert parent;
+
+        // Child uses its own external key for upsert AND references parent by AccountNumber
+        String json = JSON.serialize(new List<Map<String, Object>>{
+            new Map<String, Object>{
+                'LastName'              => 'E2E_Combined_Contact',
+                'FirstName'            => 'Test',
+                'CSV_External_Key__c'  => 'CEXT-002',
+                'Account.AccountNumber' => 'EXT-ACC-002'
+            }
+        });
+
+        Test.startTest();
+        FuruAgentController.BulkImportResult res =
+            FuruAgentController.bulkImportCsv('Contact', json, 'CSV_External_Key__c');
+        Test.stopTest();
+
+        System.assertEquals(1, res.totalInserted, 'Contact must be upserted (created)');
+        System.assertEquals(0, res.totalFailed,   'No failures expected');
+
+        Contact c = [SELECT LastName, AccountId FROM Contact WHERE CSV_External_Key__c = 'CEXT-002' LIMIT 1];
+        System.assertEquals('E2E_Combined_Contact', c.LastName);
+        System.assertEquals(parent.Id, c.AccountId,
+            'AccountId must be resolved from Account.AccountNumber external key');
+    }
 }
