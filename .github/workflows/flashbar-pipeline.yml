@@ -143,12 +143,6 @@ jobs:
             --wait 20
           sf org delete scratch --target-org install-test-org --no-prompt
 
-      - name: Deploy Cloudflare Worker (Staging)
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          environment: 'staging'
-
   # ===========================================================================
   # STAGE 4: Production Release (main branch)
   # ===========================================================================
@@ -168,12 +162,6 @@ jobs:
           echo "${{ secrets.SFDX_AUTH_URL }}" > auth.txt
           sf org login sfdx-url --sfdx-url-file auth.txt --set-default-dev-hub --alias devhub
           rm auth.txt
-
-      - name: Deploy Cloudflare Worker (Production)
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          environment: 'production'
 
       - name: Get Latest Package Version
         id: get_version
