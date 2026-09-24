@@ -1,0 +1,28 @@
+.furu-triage__badge--critical {
+    background-color: #c23934;
+    color: #fff;
+}
+
+.furu-triage__badge--high {
+    background-color: #dd7a01;
+    color: #fff;
+}
+
+.furu-triage__badge--low {
+    background-color: #ecebea;
+    color: #3e3e3c;
+}
+
+.furu-triage__escalation {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+}
+
+.furu-triage__reasoning {
+    font-style: italic;
+    color: #3e3e3c;
+}
+
+.furu-triage__assign-btn {
+    width: 100%;
+}

@@ -1,0 +1,103 @@
+<template>
+    <div class="fla-overlay">
+
+        <!-- ── Header ──────────────────────────────────────────────────── -->
+        <div class="fla-header">
+            <span class="fla-header__title">🎯 リード クオリファイ &amp; 割当</span>
+            <span class="fla-header__count">{totalCount} 件</span>
+            <span class="fla-header__spacer"></span>
+            <button class="fla-btn fla-btn--close"
+                    onclick={handleClose}
+                    title="閉じる"
+                    type="button">✕ 閉じる</button>
+        </div>
+
+        <!-- ── Rep assignment toolbar ─────────────────────────────────── -->
+        <div class="fla-toolbar">
+            <span class="fla-toolbar__label">担当者を追加:</span>
+            <lightning-record-picker class="fla-user-picker"
+                                      object-api-name="User"
+                                      matching-info={userPickerMatchingInfo}
+                                      placeholder="ユーザーを検索..."
+                                      onchange={handlePickerChange}>
+            </lightning-record-picker>
+            <button class="fla-btn fla-btn--add-rep"
+                    onclick={handleAddRep}
+                    disabled={addRepDisabled}
+                    type="button">+ 追加</button>
+
+            <template for:each={_reps} for:item="rep">
+                <span key={rep.id} class="fla-rep-chip">
+                    {rep.name}
+                    <button class="fla-rep-chip__rm"
+                            data-id={rep.id}
+                            onclick={handleRemoveRep}
+                            type="button">✕</button>
+                </span>
+            </template>
+
+            <div class="fla-toolbar__spacer"></div>
+
+            <span class="fla-toolbar__label">最小ICPスコア:</span>
+            <input class="fla-min-score-input"
+                   type="number"
+                   step="0.1"
+                   min="0"
+                   max="1"
+                   value={_minIcpScore}
+                   onchange={handleMinScoreChange} />
+
+            <button class="fla-btn fla-btn--assign"
+                    onclick={handleAssign}
+                    disabled={assignDisabled}
+                    type="button">{assignLabel}</button>
+        </div>
+
+        <!-- ── Loading overlay ────────────────────────────────────────── -->
+        <template lwc:if={_isLoading}>
+            <div class="fla-loading">
+                <div class="fla-spinner"></div>
+                <span>ICPスコアを算出中...</span>
+            </div>
+        </template>
+
+        <!-- ── Table ──────────────────────────────────────────────────── -->
+        <template lwc:if={tableRows.length}>
+            <div class="fla-table-wrap">
+                <table class="fla-table">
+                    <thead>
+                        <tr>
+                            <th class="fla-th fla-th--name">リード名</th>
+                            <th class="fla-th">会社名</th>
+                            <th class="fla-th fla-th--score">ICPスコア</th>
+                            <th class="fla-th fla-th--tier">階層</th>
+                            <th class="fla-th">理由</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template for:each={tableRows} for:item="row">
+                            <tr key={row.key}>
+                                <td class="fla-td fla-td--name">{row.name}</td>
+                                <td class="fla-td">{row.company}</td>
+                                <td class="fla-td fla-td--score">{row.icpScoreLabel}</td>
+                                <td class="fla-td fla-td--tier">
+                                    <span class={row.tierClass}>{row.tier}</span>
+                                </td>
+                                <td class="fla-td fla-td--reason">{row.reasoning}</td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </template>
+
+        <!-- ── Footer ─────────────────────────────────────────────────── -->
+        <div class="fla-footer">
+            <span class="fla-footer__counts">{totalCount}件 / 担当者 {_reps.length}名選択中</span>
+            <template lwc:if={hasResultMsg}>
+                <span class={resultMsgClass}>{_resultMsg}</span>
+            </template>
+        </div>
+
+    </div>
+</template>

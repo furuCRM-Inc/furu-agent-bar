@@ -1886,6 +1886,106 @@
     color:        var(--furu-accent, #4a90e2);
 }
 
+/* ── Disambiguation "Recommended" badge ─────────────────────────────── */
+.furu-bar__badge {
+    display:        inline-block;
+    font-size:      0.62rem;
+    font-weight:    700;
+    padding:        1px 5px;
+    border-radius:  3px;
+    margin-right:   5px;
+    vertical-align: middle;
+    white-space:    nowrap;
+}
+.furu-bar__badge--recommended {
+    background: #fff4cc;
+    color:      #8a6000;
+    border:     1px solid #e8c84a;
+}
+
+/* ── Clarify card (low/ambiguous confidence — re-prompting) ─────────── */
+.furu-bar__clarify {
+    background:    var(--furu-card-bg, #fff);
+    border:        1px solid #7ab3f0;
+    border-radius: var(--furu-radius, 8px);
+    margin-top:    6px;
+    padding:       10px 12px 8px;
+}
+.furu-bar__clarify-header {
+    display:       flex;
+    align-items:   center;
+    gap:           6px;
+    margin-bottom: 8px;
+}
+.furu-bar__clarify-icon { font-size: 0.9rem; }
+.furu-bar__clarify-msg {
+    flex:        1;
+    font-size:   0.78rem;
+    font-weight: 600;
+    color:       var(--furu-text, #333);
+}
+.furu-bar__clarify-sosl-btn {
+    width:         100%;
+    text-align:    left;
+    background:    var(--furu-bg, #fafafa);
+    border:        1px dashed #b0c8e8;
+    border-radius: 6px;
+    padding:       7px 10px;
+    font-size:     0.78rem;
+    color:         var(--furu-accent, #4a90e2);
+    cursor:        pointer;
+    transition:    background 0.12s, border-color 0.12s;
+}
+.furu-bar__clarify-sosl-btn:hover {
+    background:   var(--furu-hover, #f0f4ff);
+    border-color: var(--furu-accent, #4a90e2);
+}
+
+/* ── Admin debug toggle (gear icon in footer, admin-only) ────────────── */
+.furu-bar__debug-toggle {
+    background:  none;
+    border:      none;
+    cursor:      pointer;
+    font-size:   0.72rem;
+    color:       var(--furu-text-muted, #999);
+    padding:     2px 4px;
+    border-radius: 4px;
+    opacity:     0.4;
+    transition:  opacity 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+.furu-bar__debug-toggle:hover {
+    opacity: 1;
+    color:   var(--furu-accent, #4a90e2);
+}
+
+/* ── Admin debug panel (monospace, dark) ─────────────────────────────── */
+.furu-bar__debug-panel {
+    display:       flex;
+    flex-wrap:     wrap;
+    align-items:   center;
+    gap:           6px 14px;
+    padding:       6px 10px;
+    margin:        4px 0 0;
+    background:    #1a1a2e;
+    border-radius: 6px;
+    border:        1px solid #363660;
+}
+.furu-bar__debug-label {
+    width:          100%;
+    font-size:      0.6rem;
+    font-weight:    700;
+    color:          #7ab3f0;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+.furu-bar__debug-item {
+    font-size:   0.68rem;
+    color:       #a0a0c0;
+    font-family: monospace;
+}
+.furu-bar__debug-item b { color: #9dd3ff; }
+
 .furu-bar__soql-loading {
     display:         flex;
     justify-content: center;

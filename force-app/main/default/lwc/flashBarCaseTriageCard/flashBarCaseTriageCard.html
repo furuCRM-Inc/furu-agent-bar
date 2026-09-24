@@ -1,0 +1,94 @@
+<template>
+    <!-- Loading -->
+    <template lwc:if={_loading}>
+        <div class="slds-align_absolute-center slds-p-vertical_medium">
+            <lightning-spinner alternative-text="Analyzing case..." size="small"></lightning-spinner>
+        </div>
+    </template>
+
+    <!-- Error -->
+    <template lwc:elseif={_error}>
+        <div class="slds-notify slds-notify_alert slds-theme_error slds-m-bottom_small" role="alert">
+            <span class="slds-assistive-text">Error</span>
+            <span>{_error}</span>
+        </div>
+        <div class="slds-align_absolute-center">
+            <lightning-button label="Retry" onclick={handleRefresh} variant="neutral" size="small"></lightning-button>
+        </div>
+    </template>
+
+    <!-- Triage result -->
+    <template lwc:elseif={_triage}>
+        <div class="slds-card__body slds-card__body_inner">
+
+            <!-- Urgency row -->
+            <div class="slds-grid slds-gutters_x-small slds-grid_vertical-align-center slds-m-bottom_x-small">
+                <div class="slds-col slds-size_1-of-2">
+                    <span class="slds-text-body_small slds-text-color_weak">Urgency</span>
+                </div>
+                <div class="slds-col slds-size_1-of-2 slds-text-align_right">
+                    <span class={badgeTheme}>{urgencyPercent}%</span>
+                </div>
+            </div>
+
+            <!-- Escalation banner -->
+            <template lwc:if={isEscalation}>
+                <div class="slds-notify slds-notify_alert slds-theme_error slds-m-bottom_small furu-triage__escalation" role="alert">
+                    <lightning-icon icon-name="utility:warning" size="x-small" variant="inverse" class="slds-m-right_xx-small"></lightning-icon>
+                    Immediate escalation required
+                </div>
+            </template>
+
+            <!-- Recommended queue -->
+            <div class="slds-m-bottom_small">
+                <span class="slds-text-body_small slds-text-color_weak">Recommended Queue: </span>
+                <span class="slds-text-body_regular">{_triage.recommendedQueueLabel}</span>
+            </div>
+
+            <!-- Reasoning -->
+            <template lwc:if={_triage.reasoning}>
+                <div class="slds-box slds-box_x-small slds-theme_shade slds-m-bottom_small furu-triage__reasoning">
+                    <p class="slds-text-body_small">{_triage.reasoning}</p>
+                </div>
+            </template>
+
+            <!-- Assign button / success -->
+            <template lwc:if={_assigned}>
+                <div class="slds-notify slds-notify_toast slds-theme_success" role="status">
+                    <lightning-icon icon-name="utility:check" size="x-small" variant="inverse" class="slds-m-right_xx-small"></lightning-icon>
+                    Assigned to {_triage.recommendedQueueLabel}
+                </div>
+            </template>
+            <template lwc:else>
+                <div class="slds-grid slds-gutters_x-small slds-grid_vertical-align-center">
+                    <div class="slds-col">
+                        <lightning-button
+                            label={buttonLabel}
+                            variant="brand"
+                            disabled={isButtonDisabled}
+                            onclick={handleAssign}
+                            class="furu-triage__assign-btn">
+                        </lightning-button>
+                    </div>
+                    <div class="slds-col slds-no-flex">
+                        <template lwc:if={_assigning}>
+                            <lightning-spinner alternative-text="Assigning..." size="x-small"></lightning-spinner>
+                        </template>
+                    </div>
+                </div>
+            </template>
+
+        </div>
+
+        <!-- Refresh footer -->
+        <div class="slds-card__footer slds-text-align_right">
+            <lightning-button-icon
+                icon-name="utility:refresh"
+                alternative-text="Refresh"
+                variant="bare"
+                size="small"
+                onclick={handleRefresh}>
+            </lightning-button-icon>
+        </div>
+    </template>
+</template>

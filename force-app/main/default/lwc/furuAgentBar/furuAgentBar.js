@@ -163,6 +163,8 @@ const I18N = {
         proceed:      'そのまま続行',
         cancel:       'キャンセル',
         ctxRulesTitle: '適用中のAIルール',
+        recommended:  '★ おすすめ',
+        keywordSearchFallback: '🔍 キーワード検索にフォールバック',
         chips: [
             { key: 'addr',  label: '〒 住所自動入力', cmd: '〒 ' },
             { key: 'memo',  label: '📝 メモ解析',     cmd: '' },
@@ -185,6 +187,8 @@ const I18N = {
         proceed:      'Proceed Anyway',
         cancel:       'Cancel',
         ctxRulesTitle: 'Active AI Rules',
+        recommended:  '★ Best Match',
+        keywordSearchFallback: '🔍 Fall back to keyword search',
         chips: [
             { key: 'addr',  label: '〒 Address Fill',  cmd: '〒 ' },
             { key: 'memo',  label: '📝 Paste Notes',   cmd: '' },
@@ -279,7 +283,13 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     _lastDraftChange          = null;  // { api, prev } — one-step Cmd+Z revert in edit mode
     _globalKeyHandler         = null;  // bound window keydown ref for removeEventListener
     // Disambiguation ("Did You Mean?") — medium-confidence path
-    @track _disambiguateAction = null;  // { message, sObject, candidates: [{ key, label, soqlFilter, sObject }] }
+    @track _disambiguateAction = null;  // { message, sObject, candidates: [{ key, label, soqlFilter, sObject, isRecommended }] }
+    // Clarify card — low-confidence re-prompting (< 50% or CLARIFY intent)
+    @track _clarifyAction      = null;  // { message, soslFallback }
+    // Admin debug panel — JEV score, latency, intent (admin users only)
+    @track _debugInfo          = null;  // { intent, sObject, confidencePct, latencyMs }
+    @track _showDebugPanel     = false;
+    _submitStartMs             = 0;     // timestamp before processIntent call
     // Schema cache admin
     @track _refreshingCache   = false;
     // OCR direct import
@@ -300,6 +310,8 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     @track _parentState       = null;  // { field, parentSObj, labelJa, labelEn, selectedParent, candidates, isSearching, searchText }
     // Mass editor overlay (legacy — kept for external use)
     @track _showMassEditor    = false;
+    // Lead Assigner overlay (Task 3 — ICP qualify + round-robin assign)
+    @track _showLeadAssigner  = false;
     // Navigation hub
     @track _navItems           = [];
     @track _pinDialogOpen      = false;
@@ -393,6 +405,10 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     get hasDisambiguate()    { return this._disambiguateAction !== null; }
     get disambiguateCandidates() { return this._disambiguateAction?.candidates ?? []; }
     get disambiguateMessage() { return this._disambiguateAction?.message ?? (this.isJa ? 'もしかしてこちらですか？' : 'Did you mean…?'); }
+    get hasClarify()         { return this._clarifyAction !== null; }
+    get clarifyMessage()     { return this._clarifyAction?.message ?? ''; }
+    get hasDebugPanel()      { return this._isAdmin && this._showDebugPanel && this._debugInfo !== null; }
+    get debugInfo()          { return this._debugInfo ?? {}; }
 
     // ── Context panel (ambient, idle state) ───────────────────────────────────
 
@@ -400,7 +416,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         if (!this._sObjectType) return false;
         const hasActiveCard = this.hasPrefill || this.hasGuide || this.hasResults ||
                               this.hasInsight || this.hasKnowledgeAlert || this.hasAddressCard ||
-                              this.hasPendingApprovals || this.hasCsvImport || this.hasSoqlResults || this.hasDisambiguate;
+                              this.hasPendingApprovals || this.hasCsvImport || this.hasSoqlResults || this.hasDisambiguate || this.hasClarify;
         if (hasActiveCard) return false;
         return this._contextFields.length > 0 || this._contextRules.length > 0;
     }
@@ -2173,6 +2189,8 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         this._insightAction   = null;
         this._knowledgeAlert  = null;
         this._addressCard     = null;
+        this._clarifyAction   = null;
+        this._submitStartMs   = Date.now();
 
         // Fast-path: detect Japanese postal code before calling LLM
         const zipcode = extractPostalCode(text);
@@ -2201,6 +2219,8 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
                 this._remainingCredits = action.remainingCredits;
             }
 
+            this._trackDebugInfo(action);
+
             switch (action.intent) {
                 case 'NAVIGATE':        await this._doNavigate(action);  break;
                 case 'UPDATE_RECORD':
@@ -2226,17 +2246,22 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
                 case 'GUIDE_CREATE':   this._doGuide(action);           break;
                 case 'SOQL_SEARCH':    this._doSoqlSearch(action);        break;
                 case 'DISAMBIGUATE':   this._doDisambiguate(action);      break;
+                case 'CLARIFY':        this._doClarify(action);           break;
                 case 'ADD_FIELDS':     this._doAddFields(action);       break;
                 case 'EXPLAIN_FIELD':  this._doInsight(action);         break;
                 case 'EXPLAIN_FORMULA':this._doInsight(action);         break;
                 case 'CREATE_REPORT':
                 case 'CREATE_DASHBOARD': await this._doCreateAnalytics(action); break;
                 case 'REPORT_EXPLAIN':   this._doReportExplain(action);  break;
-                // UNKNOWN with a question message = model is asking for clarification
+                // UNKNOWN: show clarify card if AI is asking a question, otherwise warning banner
                 default: {
                     const msg = action.message || (this.isJa ? 'リクエストを理解できませんでした。' : 'Could not understand request.');
-                    const isQuestion = msg.endsWith('？') || msg.endsWith('?');
-                    this._setStatus(msg, isQuestion ? 'info' : 'warning');
+                    const isQuestion = /[?？]$/.test(msg.trim());
+                    if (isQuestion) {
+                        this._doClarify(action);
+                    } else {
+                        this._setStatus(msg, 'warning');
+                    }
                 }
             }
 
@@ -2421,10 +2446,11 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             message:    action.message,
             sObject:    sObj,
             candidates: (action.candidates ?? []).map((c, i) => ({
-                key:        String(i),
-                label:      c.label ?? `Option ${i + 1}`,
-                soqlFilter: c.soqlFilter ?? null,  // { conditions, order_by, limit }
-                sObject:    c.sObject   ?? sObj,
+                key:           String(i),
+                label:         c.label ?? `Option ${i + 1}`,
+                soqlFilter:    c.soqlFilter ?? null,  // { conditions, order_by, limit }
+                sObject:       c.sObject   ?? sObj,
+                isRecommended: i === 0,   // first candidate gets the "★ Recommended" badge
             })),
         };
         this._setStatus(action.message ?? (this.isJa ? 'もしかしてこちらですか？' : 'Did you mean…?'), 'info');
@@ -2498,6 +2524,39 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     }
 
     dismissDisambiguate() { this._disambiguateAction = null; }
+
+    // ── Clarify card — re-prompting for CLARIFY / UNKNOWN-question intents ────
+
+    _doClarify(action) {
+        this._clarifyAction = {
+            message:      action.message ?? (this.isJa ? '入力をもう少し具体的にしてみてください。' : 'Please clarify your request.'),
+            soslFallback: action.search_query ?? this.inputText ?? '',
+        };
+    }
+
+    handleClarifyKeywordSearch() {
+        const term = this._clarifyAction?.soslFallback ?? this.inputText ?? '';
+        this._clarifyAction = null;
+        if (term.trim()) {
+            this._doSearch({ intent: 'SEARCH', search_query: term.trim(), search_sobject: this._sObjectType, message: `🔍 ${term.trim()}` });
+        }
+    }
+
+    dismissClarify() { this._clarifyAction = null; }
+
+    // ── Admin debug panel ─────────────────────────────────────────────────────
+
+    _trackDebugInfo(action) {
+        const pct = Math.round(((action.confidence ?? 0) / (action.confidence > 1 ? 100 : 1)) * 100);
+        this._debugInfo = {
+            intent:        action.intent         ?? '—',
+            sObject:       action.sObjectType    ?? action.search_sobject ?? '—',
+            confidencePct: action.confidence > 1 ? Math.round(action.confidence) : pct,
+            latencyMs:     Date.now() - this._submitStartMs,
+        };
+    }
+
+    toggleDebugPanel() { this._showDebugPanel = !this._showDebugPanel; }
 
     // ── SOQL Load More ────────────────────────────────────────────────────────
 
@@ -2825,6 +2884,27 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     }
 
     get massEditorRecords() {
+        return this._soqlQuery?.records ?? [];
+    }
+
+    // ── Lead Assigner (Task 3) ───────────────────────────────────────────────
+
+    get isLeadSObject() {
+        return this._soqlQuery?.sObject === 'Lead';
+    }
+
+    handleOpenLeadAssigner() {
+        if (this.isLeadSObject && this._soqlQuery?.records?.length) this._showLeadAssigner = true;
+    }
+
+    handleLeadAssignerClose(e) {
+        this._showLeadAssigner = false;
+        if (e?.detail?.assignedCount > 0) {
+            this._setStatus(`${e.detail.assignedCount}件のリードを割り当てました`, 'success');
+        }
+    }
+
+    get leadAssignerRecords() {
         return this._soqlQuery?.records ?? [];
     }
 

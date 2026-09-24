@@ -1,0 +1,299 @@
+/* ── Overlay ──────────────────────────────────────────────────────────────── */
+.fla-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #111827;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    color: #e2e8f0;
+    font-family: inherit;
+}
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+.fla-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: #1a1a2e;
+    border-bottom: 1px solid #2d3748;
+    flex-shrink: 0;
+}
+
+.fla-header__title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #f5a623;
+    letter-spacing: 0.3px;
+}
+
+.fla-header__count {
+    font-size: 12px;
+    color: #94a3b8;
+    background: #2d3748;
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+.fla-header__spacer {
+    flex: 1;
+}
+
+/* ── Toolbar ──────────────────────────────────────────────────────────────── */
+.fla-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 16px;
+    background: #1e293b;
+    border-bottom: 1px solid #2d3748;
+    flex-shrink: 0;
+}
+
+.fla-toolbar__label {
+    font-size: 12px;
+    color: #94a3b8;
+    white-space: nowrap;
+}
+
+.fla-toolbar__spacer {
+    flex: 1;
+}
+
+.fla-user-picker {
+    min-width: 220px;
+    max-width: 280px;
+}
+
+.fla-min-score-input {
+    background: #2d3748;
+    border: 1px solid #4a5568;
+    border-radius: 6px;
+    color: #e2e8f0;
+    font-size: 12px;
+    padding: 5px 8px;
+    width: 70px;
+    outline: none;
+}
+
+.fla-rep-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(245, 166, 35, 0.15);
+    border: 1px solid rgba(245, 166, 35, 0.4);
+    color: #fcd34d;
+    border-radius: 12px;
+    padding: 3px 6px 3px 10px;
+    font-size: 12px;
+}
+
+.fla-rep-chip__rm {
+    background: transparent;
+    border: none;
+    color: #fcd34d;
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0 4px;
+}
+
+/* ── Loading ──────────────────────────────────────────────────────────────── */
+.fla-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 24px;
+    color: #94a3b8;
+    font-size: 13px;
+}
+
+.fla-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #4a5568;
+    border-top-color: #f5a623;
+    border-radius: 50%;
+    animation: fla-spin 0.7s linear infinite;
+}
+
+@keyframes fla-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ── Table ────────────────────────────────────────────────────────────────── */
+.fla-table-wrap {
+    flex: 1;
+    overflow: auto;
+}
+
+.fla-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.fla-th {
+    position: sticky;
+    top: 0;
+    background: #1a1a2e;
+    color: #94a3b8;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 8px 10px;
+    border-bottom: 2px solid #2d3748;
+    white-space: nowrap;
+    text-align: left;
+    z-index: 2;
+}
+
+.fla-th--score,
+.fla-th--tier {
+    width: 90px;
+}
+
+.fla-td {
+    padding: 7px 10px;
+    border-bottom: 1px solid #1e293b;
+    vertical-align: middle;
+    color: #e2e8f0;
+}
+
+.fla-td--name {
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.fla-td--score {
+    font-variant-numeric: tabular-nums;
+    color: #93c5fd;
+}
+
+.fla-td--reason {
+    color: #94a3b8;
+    max-width: 320px;
+}
+
+/* ── Tier badges ──────────────────────────────────────────────────────────── */
+.fla-tier {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+    letter-spacing: 0.3px;
+}
+
+.fla-tier--hot {
+    background: rgba(239, 68, 68, 0.18);
+    color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.fla-tier--warm {
+    background: rgba(245, 158, 11, 0.18);
+    color: #fcd34d;
+    border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.fla-tier--cold {
+    background: rgba(59, 130, 246, 0.18);
+    color: #93c5fd;
+    border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+.fla-btn {
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 12px;
+    transition: opacity 0.15s, transform 0.1s;
+    white-space: nowrap;
+}
+
+.fla-btn:active {
+    transform: scale(0.97);
+}
+
+.fla-btn--assign {
+    background: #f5a623;
+    color: #111827;
+}
+
+.fla-btn--assign:disabled {
+    background: #78590f;
+    color: #64748b;
+    cursor: not-allowed;
+}
+
+.fla-btn--add-rep {
+    background: #1e3a5f;
+    color: #93c5fd;
+}
+
+.fla-btn--add-rep:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.fla-btn--close {
+    background: #7f1d1d;
+    color: #fca5a5;
+    margin-left: 4px;
+}
+
+.fla-btn--close:hover {
+    background: #991b1b;
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+.fla-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    background: #1a1a2e;
+    border-top: 1px solid #2d3748;
+    flex-shrink: 0;
+}
+
+.fla-footer__counts {
+    font-size: 11px;
+    color: #64748b;
+}
+
+/* ── Result messages ──────────────────────────────────────────────────────── */
+.fla-result-msg {
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 4px;
+}
+
+.fla-result-msg--success {
+    background: rgba(34, 197, 94, 0.15);
+    color: #86efac;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.fla-result-msg--warning {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fcd34d;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.fla-result-msg--error {
+    background: rgba(239, 68, 68, 0.15);
+    color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}

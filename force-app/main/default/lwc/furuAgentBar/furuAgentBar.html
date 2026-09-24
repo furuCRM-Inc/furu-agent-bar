@@ -91,6 +91,12 @@
                     />
                 </label>
                 <span class="furu-bar__hint">{i18n.hint}</span>
+                <template lwc:if={isAdmin}>
+                    <button class="furu-bar__debug-toggle"
+                            onclick={toggleDebugPanel}
+                            type="button"
+                            title="Admin Debug Panel">⚙</button>
+                </template>
                 <button
                     class="furu-bar__submit"
                     onclick={handleSubmit}
@@ -441,10 +447,30 @@
                             <button class="furu-bar__disambig-btn"
                                     data-idx={c.key}
                                     onclick={handleDisambiguateSelect}
-                                    type="button">{c.label}</button>
+                                    type="button">
+                                <template lwc:if={c.isRecommended}>
+                                    <span class="furu-bar__badge furu-bar__badge--recommended">{i18n.recommended}</span>
+                                </template>
+                                {c.label}
+                            </button>
                         </li>
                     </template>
                 </ul>
+            </div>
+        </template>
+
+        <!-- ── Clarify Card ("I didn't understand — please clarify") ──── -->
+        <template lwc:if={hasClarify}>
+            <div class="furu-bar__clarify">
+                <div class="furu-bar__clarify-header">
+                    <span class="furu-bar__clarify-icon">❓</span>
+                    <span class="furu-bar__clarify-msg">{clarifyMessage}</span>
+                    <button class="furu-bar__pill-btn furu-bar__pill-btn--muted"
+                            onclick={dismissClarify} type="button">✕</button>
+                </div>
+                <button class="furu-bar__clarify-sosl-btn"
+                        onclick={handleClarifyKeywordSearch}
+                        type="button">{i18n.keywordSearchFallback}</button>
             </div>
         </template>
 
@@ -839,6 +865,11 @@
                                 <button class="furu-bar__soql-act-btn"
                                         onclick={handleOpenPinDialog}
                                         type="button">📌 ピン留め</button>
+                                <template lwc:if={isLeadSObject}>
+                                    <button class="furu-bar__soql-act-btn furu-bar__soql-act-btn--active"
+                                            onclick={handleOpenLeadAssigner}
+                                            type="button">🎯 クオリファイ&amp;割当</button>
+                                </template>
                             </template>
                         </div>
                         <div class="furu-bar__soql-table-wrap">
@@ -1214,6 +1245,17 @@
             </div>
         </template>
 
+        <!-- ── Admin Debug Panel ──────────────────────────────────────── -->
+        <template lwc:if={hasDebugPanel}>
+            <div class="furu-bar__debug-panel">
+                <span class="furu-bar__debug-label">🛠 DEBUG</span>
+                <span class="furu-bar__debug-item">Intent: <b>{debugInfo.intent}</b></span>
+                <span class="furu-bar__debug-item">JEV: <b>{debugInfo.confidencePct}%</b></span>
+                <span class="furu-bar__debug-item">Latency: <b>{debugInfo.latencyMs}ms</b></span>
+                <span class="furu-bar__debug-item">sObj: <b>{debugInfo.sObject}</b></span>
+            </div>
+        </template>
+
     </div>
 
     <!-- ── Mass Editor Overlay ──────────────────────────────────────── -->
@@ -1224,6 +1266,14 @@
             field-names={massEditorFieldNames}
             onmasseditorclose={handleMassEditorClose}>
         </c-furu-agent-mass-editor>
+    </template>
+
+    <!-- ── Lead Assigner Overlay (Task 3) ─────────────────────────────── -->
+    <template lwc:if={_showLeadAssigner}>
+        <c-furu-agent-lead-assigner
+            records={leadAssignerRecords}
+            onleadassignerclose={handleLeadAssignerClose}>
+        </c-furu-agent-lead-assigner>
     </template>
 
 </template>
