@@ -1131,13 +1131,22 @@ public with sharing class FuruAgentController {
             }
 
             // 4b-fix. SOQL_SEARCH: correct misclassified date-field conditions.
-            // The Worker sometimes uses CreatedDate when the user means CloseDate (Opportunity).
-            // If the input contains "今月|this month" + "完了|close|due" keywords and the
-            // returned conditions reference CreatedDate, replace with CloseDate = THIS_MONTH.
+            // The Worker sometimes uses CreatedDate when the user means CloseDate (Opportunity),
+            // especially for close-date keywords (完了予定, クローズ) paired with time periods.
             if (result.intent == 'SOQL_SEARCH' && result.soqlRecords != null && result.soqlFilterJson != null) {
                 String lower = (userInput ?? '').toLowerCase();
-                Boolean wantsCloseDate = (lower.contains('完了予定') || lower.contains('期限') || lower.contains('close') || lower.contains('due'))
-                    && (lower.contains('今月') || lower.contains('this month') || lower.contains('今週') || lower.contains('this week'));
+                Boolean hasCloseDateKeyword =
+                    lower.contains('完了予定') || lower.contains('クローズ') || lower.contains('期限')
+                    || lower.contains('close') || lower.contains('due') || lower.contains('契約予定');
+                // Map time-period keywords → target SOQL date literal
+                String targetDateLiteral = null;
+                if (lower.contains('今月') || lower.contains('this month'))       targetDateLiteral = 'THIS_MONTH';
+                else if (lower.contains('来月') || lower.contains('next month'))  targetDateLiteral = 'NEXT_MONTH';
+                else if (lower.contains('今週') || lower.contains('this week'))   targetDateLiteral = 'THIS_WEEK';
+                else if (lower.contains('来週') || lower.contains('next week'))   targetDateLiteral = 'NEXT_WEEK';
+                else if (lower.contains('今四半期') || lower.contains('this quarter')) targetDateLiteral = 'THIS_QUARTER';
+                else if (lower.contains('来四半期') || lower.contains('next quarter')) targetDateLiteral = 'NEXT_QUARTER';
+                Boolean wantsCloseDate = hasCloseDateKeyword && targetDateLiteral != null;
                 if (wantsCloseDate) {
                     try {
                         List<Object> conds = (List<Object>) JSON.deserializeUntyped(result.soqlFilterJson);
@@ -1149,7 +1158,7 @@ public with sharing class FuruAgentController {
                             if ('CreatedDate'.equalsIgnoreCase(String.valueOf(cm.get('field')))) hasCreatedDate = true;
                         }
                         if (!hasCloseDate && hasCreatedDate) {
-                            // Replace CreatedDate conditions with CloseDate = THIS_MONTH
+                            // Replace all CreatedDate conditions with CloseDate = <targetDateLiteral>
                             List<Object> fixed = new List<Object>();
                             for (Object raw : conds) {
                                 Map<String, Object> cm = (Map<String, Object>) raw;
@@ -1157,7 +1166,7 @@ public with sharing class FuruAgentController {
                                     fixed.add(cm);
                                 }
                             }
-                            fixed.add(new Map<String, Object>{ 'field' => 'CloseDate', 'op' => 'eq', 'value' => 'THIS_MONTH' });
+                            fixed.add(new Map<String, Object>{ 'field' => 'CloseDate', 'op' => 'eq', 'value' => targetDateLiteral });
                             String fixedJson = JSON.serialize(fixed);
                             result.soqlFilterJson = fixedJson;
                             result.soqlRecords = executeSoqlQuery(

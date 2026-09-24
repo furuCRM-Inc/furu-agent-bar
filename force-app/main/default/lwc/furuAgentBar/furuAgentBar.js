@@ -534,11 +534,13 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             THIS_QUARTER: '今四半期', THIS_YEAR: '今年',
             LAST_WEEK: '先週', LAST_MONTH: '先月', LAST_YEAR: '昨年',
             YESTERDAY: '昨日', TOMORROW: '明日', NEXT_WEEK: '来週', NEXT_MONTH: '来月',
+            NEXT_QUARTER: '来四半期', NEXT_YEAR: '来年', LAST_QUARTER: '前四半期',
         } : {
             TODAY: 'today', THIS_WEEK: 'this week', THIS_MONTH: 'this month',
             THIS_QUARTER: 'this quarter', THIS_YEAR: 'this year',
             LAST_WEEK: 'last week', LAST_MONTH: 'last month', LAST_YEAR: 'last year',
             YESTERDAY: 'yesterday', TOMORROW: 'tomorrow', NEXT_WEEK: 'next week', NEXT_MONTH: 'next month',
+            NEXT_QUARTER: 'next quarter', NEXT_YEAR: 'next year', LAST_QUARTER: 'last quarter',
         };
 
         return this._soqlQuery.conditions.map((c, i) => {
