@@ -628,9 +628,21 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             apiName:      f.apiName,
             label:        f.label ?? f.apiName ?? '—',
             isRequired:   f.isRequired,
-            displayValue: f.value != null ? String(f.value) : '—',
+            displayValue: f.displayValue != null ? String(f.displayValue) : (f.value != null ? String(f.value) : '—'),
+            isReferenceLink: !!(f.isReference && f.referenceRecordId),
+            referenceRecordId: f.referenceRecordId,
             cssClass:     `furu-bar__summary-field${f.isRequired ? ' furu-bar__summary-field--req' : ''}`,
         }));
+    }
+
+    handleSummaryFieldNavigate(event) {
+        event.preventDefault();
+        const id = event.currentTarget.dataset.id;
+        if (!id) return;
+        this[NavigationMixin.Navigate]({
+            type:       'standard__recordPage',
+            attributes: { recordId: id, actionName: 'view' },
+        });
     }
 
     get summaryEditSaveLabel() {

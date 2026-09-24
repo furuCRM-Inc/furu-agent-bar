@@ -40,7 +40,10 @@ public with sharing class FlashBarSummaryService {
         @AuraEnabled public String  label;
         @AuraEnabled public String  fieldType;
         @AuraEnabled public Boolean isRequired;
-        @AuraEnabled public String  value;      // current record value (null = not fetched)
+        @AuraEnabled public String  value;              // current record value (null = not fetched); raw Id for REFERENCE fields
+        @AuraEnabled public String  displayValue;        // what to render — resolved parent Name for REFERENCE fields, else same as value
+        @AuraEnabled public Boolean isReference;         // true for lookup/master-detail fields
+        @AuraEnabled public String  referenceRecordId;   // navigation target for REFERENCE fields (same as value)
         @AuraEnabled public Boolean isChecked;  // selection state in edit mode
     }
 
@@ -207,10 +210,38 @@ public with sharing class FlashBarSummaryService {
     private static List<SummaryField> fetchValues(String sObjectApiName, String recordId, List<SummaryField> defs) {
         if (defs.isEmpty()) return defs;
 
+        Schema.SObjectType   selfToken = Schema.getGlobalDescribe().get(sObjectApiName);
+        Map<String, Schema.SObjectField> selfFieldMap = selfToken != null
+            ? selfToken.getDescribe().fields.getMap() : new Map<String, Schema.SObjectField>();
+
         List<String> apiNames = new List<String>{'Id'};
+        // apiName -> 'RelationshipName.Name' — only populated when the reference's
+        // target object has a resolvable "name-like" field to traverse to.
+        Map<String, String> refPathByField = new Map<String, String>();
+
         for (SummaryField f : defs) {
-            if (!f.apiName.contains('.')) apiNames.add(f.apiName);
+            if (f.apiName.contains('.')) continue;
+            apiNames.add(f.apiName);
+            f.isReference = f.fieldType == 'REFERENCE';
+            if (!f.isReference) continue;
+
+            Schema.SObjectField sf = selfFieldMap.get(f.apiName);
+            if (sf == null) continue;
+            Schema.DescribeFieldResult fr = sf.getDescribe();
+            List<Schema.SObjectType> refTargets = fr.getReferenceTo();
+            String relName = fr.getRelationshipName();
+            // Skip polymorphic lookups (e.g. OwnerId, WhoId) — ambiguous which
+            // object's name field to traverse to; render the raw Id for those.
+            if (refTargets.size() != 1 || String.isBlank(relName)) continue;
+
+            String nameLikeField = resolveReferenceNameField(refTargets[0]);
+            if (nameLikeField == null) continue;
+
+            String path = relName + '.' + nameLikeField;
+            refPathByField.put(f.apiName, path);
+            apiNames.add(path);
         }
+
         try {
             String soql = 'SELECT ' + String.join(apiNames, ', ')
                 + ' FROM ' + sObjectApiName
@@ -222,10 +253,34 @@ public with sharing class FlashBarSummaryService {
                     if (f.apiName.contains('.')) continue;
                     Object raw = rec.get(f.apiName);
                     f.value = raw != null ? String.valueOf(raw) : null;
+
+                    if (f.isReference && f.value != null) {
+                        f.referenceRecordId = f.value;
+                        String path = refPathByField.get(f.apiName);
+                        Object resolvedName = null;
+                        if (path != null) {
+                            List<String> parts = path.split('\\.');
+                            SObject parent = rec.getSObject(parts[0]);
+                            resolvedName = parent != null ? parent.get(parts[1]) : null;
+                        }
+                        f.displayValue = resolvedName != null ? String.valueOf(resolvedName) : f.value;
+                    } else {
+                        f.displayValue = f.value;
+                    }
                 }
             }
         } catch (Exception ignored) {}
         return defs;
+    }
+
+    /** The field to traverse to for a human-readable label on a lookup's target object. */
+    private static String resolveReferenceNameField(Schema.SObjectType targetType) {
+        if (targetType == null) return null;
+        Map<String, Schema.SObjectField> fieldMap = targetType.getDescribe().fields.getMap();
+        if (fieldMap.containsKey('Name'))       return 'Name';
+        if (fieldMap.containsKey('Subject'))    return 'Subject';
+        if (fieldMap.containsKey('CaseNumber')) return 'CaseNumber';
+        return null;
     }
 
     // ── Private — async cache write ───────────────────────────────────────────

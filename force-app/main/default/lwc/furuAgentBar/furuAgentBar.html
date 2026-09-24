@@ -241,7 +241,16 @@
                             <template lwc:if={f.isRequired}>
                                 <span class="furu-bar__summary-req">必須</span>
                             </template>
-                            <span class="furu-bar__summary-value">{f.displayValue}</span>
+                            <template lwc:if={f.isReferenceLink}>
+                                <a class="furu-bar__summary-value furu-bar__summary-value--link"
+                                   data-id={f.referenceRecordId}
+                                   onclick={handleSummaryFieldNavigate}
+                                   href="#"
+                                   role="button">{f.displayValue}</a>
+                            </template>
+                            <template lwc:else>
+                                <span class="furu-bar__summary-value">{f.displayValue}</span>
+                            </template>
                         </div>
                     </template>
                 </div>

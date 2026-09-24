@@ -2551,6 +2551,16 @@
     flex:          1;
 }
 
+.furu-bar__summary-value--link {
+    color:           #f5a623;
+    text-decoration: none;
+    cursor:          pointer;
+}
+
+.furu-bar__summary-value--link:hover {
+    text-decoration: underline;
+}
+
 /* Edit mode */
 .furu-bar__summary-editor {
     max-height:     220px;
