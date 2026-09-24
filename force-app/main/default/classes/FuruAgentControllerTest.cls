@@ -66,6 +66,68 @@ private class FuruAgentControllerTest {
         System.assertEquals('SEARCH', result.intent, 'Intent must be SEARCH');
     }
 
+    // ── processIntent — NAVIGATE by name (Name-less objects) ──────────────────
+    //
+    // Regression coverage for: "open this case <subject text>" throwing
+    // "No such column 'Name' on entity 'Case'" — findRecordId() used to hardcode
+    // `WHERE Name LIKE ...` for every sObject, but Case (and Task/Event) have no
+    // Name field. See resolveNameLikeField().
+
+    @IsTest
+    static void testProcessIntent_navigateByName_case_resolvesViaSubject() {
+        Case c = new Case(Subject = 'Structural breakdown of rotor assembly', Status = 'New', Origin = 'Web');
+        insert c;
+
+        String mockBody = JSON.serialize(new Map<String, Object>{
+            'intent'      => 'NAVIGATE',
+            'message'     => 'ケースを開きます',
+            'should_save' => false,
+            'fields'      => new Map<String, Object>(),
+            'target_sobject' => 'Case',
+            'search_name'    => 'Structural breakdown of rotor assembly'
+        });
+        Test.setMock(HttpCalloutMock.class, new WorkerMock(mockBody));
+
+        Test.startTest();
+        FuruAgentController.AgentAction result = FuruAgentController.processIntent(
+            'open this case Structural breakdown of rotor assembly plz', null, null, 'home', 'en_US'
+        );
+        Test.stopTest();
+
+        System.assertEquals('NAVIGATE', result.intent, 'Intent must be NAVIGATE');
+        System.assertEquals(c.Id, result.targetRecordId, 'Must resolve the Case via Subject, not Name');
+        System.assert(String.isBlank(result.errorMessage), 'Must not surface a SOQL error: ' + result.errorMessage);
+    }
+
+    @IsTest
+    static void testFindRecordId_case_usesSubjectField() {
+        Case c = new Case(Subject = 'Rotor bearing failure', Status = 'New', Origin = 'Web');
+        insert c;
+
+        Test.startTest();
+        String foundId = FuruAgentController.findRecordId('Case', 'Rotor bearing');
+        Test.stopTest();
+
+        System.assertEquals(c.Id, foundId);
+    }
+
+    @IsTest
+    static void testFindRecordId_unresolvableObject_returnsNullNotException() {
+        Test.startTest();
+        String foundId = FuruAgentController.findRecordId('NotARealObject__x', 'anything');
+        Test.stopTest();
+
+        System.assertEquals(null, foundId, 'Unknown sObject must fail gracefully, not throw');
+    }
+
+    @IsTest
+    static void testResolveNameLikeField_overridesAndFallback() {
+        System.assertEquals('Subject', FuruAgentController.resolveNameLikeField('Case'));
+        System.assertEquals('Subject', FuruAgentController.resolveNameLikeField('Task'));
+        System.assertEquals('Name',    FuruAgentController.resolveNameLikeField('Account'), 'Account has a real Name field');
+        System.assertEquals(null,      FuruAgentController.resolveNameLikeField('NotARealObject__x'));
+    }
+
     // ── processIntent — UNKNOWN / CLARIFY ─────────────────────────────────────
 
     @IsTest

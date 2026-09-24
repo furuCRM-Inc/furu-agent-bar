@@ -1617,13 +1617,40 @@ public with sharing class FuruAgentController {
 
     // ── Single record lookup for navigation ───────────────────────────────────
 
+    // Objects with no standard Name field — "open this <object> <text>" needs a
+    // different identifier field to search against. Extend this map rather than
+    // hardcoding 'Name' if you add NAVIGATE support for another Name-less object.
+    private static final Map<String, String> NAME_LIKE_FIELD_OVERRIDES = new Map<String, String>{
+        'Case'  => 'Subject',
+        'Task'  => 'Subject',
+        'Event' => 'Subject'
+    };
+
+    @TestVisible
+    private static String resolveNameLikeField(String sObjType) {
+        if (NAME_LIKE_FIELD_OVERRIDES.containsKey(sObjType)) return NAME_LIKE_FIELD_OVERRIDES.get(sObjType);
+        Schema.SObjectType targetType = Schema.getGlobalDescribe().get(sObjType);
+        if (targetType == null) return null;
+        Map<String, Schema.SObjectField> fieldMap = targetType.getDescribe().fields.getMap();
+        if (fieldMap.containsKey('Name'))    return 'Name';
+        if (fieldMap.containsKey('Subject')) return 'Subject';
+        return null;
+    }
+
     @TestVisible
     private static String findRecordId(String sObjType, String nameValue) {
         if (String.isBlank(sObjType) || String.isBlank(nameValue)) return null;
-        String safe = String.escapeSingleQuotes(nameValue);
-        String soql = 'SELECT Id FROM ' + sObjType + ' WHERE Name LIKE \'%' + safe + '%\' WITH USER_MODE LIMIT 1';
-        List<SObject> recs = Database.query(soql);
-        return recs.isEmpty() ? null : recs[0].Id;
+        String lookupField = resolveNameLikeField(sObjType);
+        if (lookupField == null) return null;
+        try {
+            String safe = String.escapeSingleQuotes(nameValue);
+            String soql = 'SELECT Id FROM ' + sObjType + ' WHERE ' + lookupField
+                + ' LIKE \'%' + safe + '%\' WITH USER_MODE LIMIT 1';
+            List<SObject> recs = Database.query(soql);
+            return recs.isEmpty() ? null : recs[0].Id;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     // ── Self-learning knowledge base ──────────────────────────────────────────
