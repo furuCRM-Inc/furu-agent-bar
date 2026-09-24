@@ -1112,6 +1112,37 @@ public with sharing class FuruAgentController {
                 }
             }
 
+            // 4c. NAVIGATE with no targetRecordId + ranking/listing intent → SOQL_SEARCH
+            // The Worker occasionally misclassifies "show me top N highest X" as a list-view
+            // navigation instead of a ranked query.  Intercept here and execute the query.
+            if (result.intent == 'NAVIGATE' && String.isBlank(result.targetRecordId)) {
+                String lower = userInput.toLowerCase();
+                Pattern rankPat = Pattern.compile(
+                    'top\\s*\\d|highest|lowest|most|least|biggest|smallest|ranking|order by|sort by' +
+                    '|上位|最高|最低|最大|最小|金額順|件上位|トップ\\s*\\d'
+                );
+                if (rankPat.matcher(lower).find()) {
+                    String rankObj = String.isNotBlank(result.targetSObject) ? result.targetSObject : sObjectType;
+                    result.intent        = 'SOQL_SEARCH';
+                    result.updateSObject = rankObj;
+                    // Determine ORDER BY from keywords
+                    String rankOrder = null;
+                    if (lower.contains('amount') || lower.contains('金額') || lower.contains('売上')) {
+                        rankOrder = (lower.contains('lowest') || lower.contains('least') || lower.contains('最低') || lower.contains('最小'))
+                            ? 'Amount ASC NULLS LAST' : 'Amount DESC NULLS LAST';
+                    } else if (rankObj == 'Opportunity') {
+                        rankOrder = (lower.contains('lowest') || lower.contains('least') || lower.contains('最低') || lower.contains('最小'))
+                            ? 'Amount ASC NULLS LAST' : 'Amount DESC NULLS LAST';
+                    }
+                    // Extract "top N" limit
+                    Matcher limitM = Pattern.compile('top\\s*(\\d+)').matcher(lower);
+                    Integer rankLimit = limitM.find() ? Integer.valueOf(limitM.group(1)) : 20;
+                    String rankCond = injectParentFilter('[]', sObjectType, rankObj, recordId);
+                    result.soqlFilterJson = rankCond;
+                    result.soqlRecords = executeSoqlQuery(rankObj, rankCond, null, rankOrder, rankLimit, 0);
+                }
+            }
+
         } catch (Exception e) {
             String lang = String.isNotBlank(userLanguage) ? userLanguage : UserInfo.getLanguage();
             result.intent       = 'UNKNOWN';
