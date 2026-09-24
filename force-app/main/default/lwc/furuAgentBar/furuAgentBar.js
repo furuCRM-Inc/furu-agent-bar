@@ -305,6 +305,9 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     @track _pinDialogOpen      = false;
     @track _pinLabel           = '';
     @track _pinSaving          = false;
+    // SOQL suggestion chips
+    @track _fieldSuggestions   = [];    // [{idx, apiName, label}] fields to add
+    @track _condSuggestions    = [];    // [{id, label, conditions:[]}] condition presets
     // Inline table edit mode
     @track _tableEditMode      = false;
     @track _tableDraftMap      = {};    // { recordId: { apiName: value } }
@@ -499,6 +502,8 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     get soqlWideHint()          { return !this._isWideMode && (this._soqlQuery?.selectFields?.length ?? 0) >= 4; }
     get soqlHasMore()           { return this._soqlQuery?.hasMore ?? false; }
     get soqlIsLoadingMore()     { return this._soqlQuery?.isLoadingMore ?? false; }
+    get hasFieldSuggestions()   { return !!this._soqlQuery && this._fieldSuggestions.length > 0; }
+    get hasCondSuggestions()    { return !!this._soqlQuery && this._condSuggestions.length > 0; }
     get soqlLoadMoreLabel()     { return this.isJa ? 'さらに読み込む' : 'Load more'; }
     get soqlShortcutsLabel()    { return this.isJa ? 'よく使う検索' : 'Saved searches'; }
 
@@ -1560,6 +1565,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
                 this.isJa ? `${records.length}件が見つかりました` : `${records.length} record(s) found`,
                 'info'
             );
+            this._loadSoqlSuggestions();
         } catch (err) {
             this._soqlQuery = null;
             this._setStatus(err.body?.message ?? err.message ?? 'Query failed', 'error');
@@ -2299,7 +2305,9 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             conditions = Array.isArray(raw) ? raw : [];
         } catch (_) {}
 
-        const pageSize = limit;
+        // Honour "top N" parsed by Apex — use actual returned count as page size
+        // so hasMore is false and "load more" is not offered for top-N queries
+        const pageSize = records.length > 0 && records.length < limit ? records.length : limit;
         this._soqlQuery = {
             sObject:       sObj,
             conditions,
@@ -2322,6 +2330,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             this.isJa ? `${records.length}件が見つかりました` : `${records.length} record(s) found`,
             'info'
         );
+        this._loadSoqlSuggestions();
     }
 
     // ── Disambiguation ("Did You Mean?") ─────────────────────────────────────
@@ -2391,6 +2400,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
                     this.isJa ? `${records.length}件が見つかりました` : `${records.length} record(s) found`,
                     'info'
                 );
+                this._loadSoqlSuggestions();
             } catch (err) {
                 this._soqlQuery = { ...this._soqlQuery, isLoading: false };
                 this._setStatus('Error: ' + (err.body?.message ?? err.message ?? 'Unknown'), 'error');
@@ -2549,6 +2559,115 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         }
     }
 
+    async _loadSoqlSuggestions() {
+        if (!this._soqlQuery) { this._fieldSuggestions = []; this._condSuggestions = []; return; }
+        const sObj = this._soqlQuery.sObject;
+        const selectedApis = new Set(this._soqlQuery.selectFields.map(f => f.apiName));
+        const appliedConds = this._soqlQuery.conditions ?? [];
+        try {
+            const raw = await getCandidateFields({ sObjectApiName: sObj });
+            const candidates = (raw ?? []).filter(f => !selectedApis.has(f.apiName));
+            this._fieldSuggestions = candidates.slice(0, 5).map((f, i) => ({
+                idx: i, apiName: f.apiName,
+                label:   f.label   ?? f.labelEn ?? f.apiName,
+                labelEn: f.labelEn ?? f.label   ?? f.apiName,
+            }));
+        } catch (_) {
+            this._fieldSuggestions = [];
+        }
+        this._condSuggestions = this._buildCondSuggestions(sObj, selectedApis, appliedConds);
+    }
+
+    _buildCondSuggestions(sObj, selectedApis, appliedConds) {
+        const applied = new Set((appliedConds ?? []).map(c => c.field));
+        const ja = this.isJa;
+        // ops must match Apex opSymbol: 'eq','neq','gt','gte','lt','lte','in','not_in','like','is_null','not_null'
+        const presets = {
+            Opportunity: [
+                { id: 'opp_won',   label: ja ? '受注済み'     : 'Closed Won',        conditions: [{ field: 'StageName', op: 'eq',  value: 'Closed Won' }] },
+                { id: 'opp_open',  label: ja ? '進行中'       : 'Open',              conditions: [{ field: 'StageName', op: 'neq', value: 'Closed Won' }, { field: 'StageName', op: 'neq', value: 'Closed Lost' }] },
+                { id: 'opp_month', label: ja ? '今月完了予定' : 'Closing this month', conditions: [{ field: 'CloseDate', op: 'eq',  value: 'THIS_MONTH' }] },
+                { id: 'opp_1m',    label: ja ? '金額100万以上' : '≥ ¥1M',            conditions: [{ field: 'Amount',    op: 'gte', value: 1000000 }] },
+            ],
+            Account: [
+                { id: 'acc_cust', label: ja ? '顧客'        : 'Customer',    conditions: [{ field: 'Type',          op: 'eq',  value: 'Customer' }] },
+                { id: 'acc_rev',  label: ja ? '売上1億以上' : '≥ ¥100M rev', conditions: [{ field: 'AnnualRevenue', op: 'gte', value: 100000000 }] },
+            ],
+            Contact: [
+                { id: 'con_mgr', label: ja ? '部長以上'   : 'Manager+',    conditions: [{ field: 'Title',     op: 'like',     value: '%部長%' }] },
+                { id: 'con_acc', label: ja ? '取引先あり' : 'Has Account', conditions: [{ field: 'AccountId', op: 'not_null', value: null }] },
+            ],
+            Lead: [
+                { id: 'lead_new',  label: ja ? '未対応' : 'New',            conditions: [{ field: 'Status',      op: 'eq', value: 'New' }] },
+                { id: 'lead_open', label: ja ? '未変換' : 'Not converted',  conditions: [{ field: 'IsConverted', op: 'eq', value: 'false' }] },
+            ],
+            Case: [
+                { id: 'case_open', label: ja ? '未解決'   : 'Open',          conditions: [{ field: 'Status',   op: 'neq', value: 'Closed' }] },
+                { id: 'case_hi',   label: ja ? '高優先度' : 'High priority', conditions: [{ field: 'Priority', op: 'eq',  value: 'High' }] },
+            ],
+        };
+        // filter out presets whose fields are all already applied
+        return (presets[sObj] ?? []).filter(s => !s.conditions.every(c => applied.has(c.field)));
+    }
+
+    async handleAddSuggestedField(e) {
+        const apiName = e.currentTarget.dataset.api;
+        if (!this._soqlQuery || !apiName) return;
+        const sObj = this._soqlQuery.sObject;
+        // Use label/labelEn from the suggestion (getCandidateFields locale-aware) as fallback
+        const sug = this._fieldSuggestions.find(f => f.apiName === apiName);
+        const schema = this._schemaFor(sObj, this._soqlQuery.records);
+        const fieldDef = schema.find(f => f.apiName === apiName) ?? {
+            apiName,
+            label:   sug?.label   ?? apiName,
+            labelEn: sug?.labelEn ?? sug?.label ?? apiName,
+        };
+        const mergedFields = [...this._soqlQuery.selectFields, fieldDef];
+        this._soqlQuery = { ...this._soqlQuery, selectFields: mergedFields, isLoading: true };
+        this._fieldSuggestions = this._fieldSuggestions.filter(f => f.apiName !== apiName);
+        try {
+            const records = await executeSoqlQuery({
+                sObjectType:        sObj,
+                conditionsJson:     JSON.stringify(this._soqlQuery.conditions),
+                selectApiNamesJson: JSON.stringify(mergedFields.map(f => f.apiName)),
+                orderBy:            this._soqlQuery.orderBy,
+                maxRows:            this._soqlQuery.limit,
+                offsetRows:         0,
+            });
+            this._soqlQuery = { ...this._soqlQuery, records, isLoading: false, hasMore: records.length === this._soqlQuery.limit };
+        } catch (err) {
+            this._soqlQuery = { ...this._soqlQuery, isLoading: false };
+            this._setStatus(err.body?.message ?? err.message ?? 'Query failed', 'error');
+        }
+    }
+
+    async handleApplyCondSuggestion(e) {
+        const id = e.currentTarget.dataset.id;
+        if (!this._soqlQuery || !id) return;
+        const chip = this._condSuggestions.find(c => c.id === id);
+        if (!chip) return;
+        const mergedConds = [...(this._soqlQuery.conditions ?? []), ...chip.conditions];
+        this._soqlQuery = { ...this._soqlQuery, conditions: mergedConds, isLoading: true };
+        this._condSuggestions = this._condSuggestions.filter(c => c.id !== id);
+        try {
+            const records = await executeSoqlQuery({
+                sObjectType:        this._soqlQuery.sObject,
+                conditionsJson:     JSON.stringify(mergedConds),
+                selectApiNamesJson: JSON.stringify(this._soqlQuery.selectFields.map(f => f.apiName)),
+                orderBy:            this._soqlQuery.orderBy,
+                maxRows:            this._soqlQuery.limit,
+                offsetRows:         0,
+            });
+            this._soqlQuery = { ...this._soqlQuery, records, isLoading: false, hasMore: records.length === this._soqlQuery.limit };
+            this._setStatus(
+                this.isJa ? `${records.length}件が見つかりました` : `${records.length} record(s) found`, 'info'
+            );
+        } catch (err) {
+            this._soqlQuery = { ...this._soqlQuery, isLoading: false };
+            this._setStatus(err.body?.message ?? err.message ?? 'Query failed', 'error');
+        }
+    }
+
     async handleRemoveSoqlField(e) {
         const apiName = e.currentTarget.dataset.api;
         if (!this._soqlQuery) return;
@@ -2576,7 +2695,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         }
     }
 
-    dismissSoqlResults() { this._soqlQuery = null; this._clearTableEditState(); }
+    dismissSoqlResults() { this._soqlQuery = null; this._fieldSuggestions = []; this._condSuggestions = []; this._clearTableEditState(); }
 
     // ── Mass Editor ───────────────────────────────────────────────────────────
 

@@ -641,6 +641,11 @@ public with sharing class FuruAgentController {
         Boolean numOnlyOp = (op == 'gt' || op == 'gte' || op == 'lt' || op == 'lte');
         if (numOnlyOp && !isNum) return null;
 
+        // Boolean literals — must not be quoted in SOQL
+        if (valStr.equalsIgnoreCase('true') || valStr.equalsIgnoreCase('false')) {
+            return field + ' ' + sym + ' ' + valStr.toLowerCase();
+        }
+
         return isNum
             ? field + ' ' + sym + ' ' + numVal
             : field + ' ' + sym + ' \'' + String.escapeSingleQuotes(valStr) + '\'';
@@ -1097,6 +1102,12 @@ public with sharing class FuruAgentController {
                     Integer limitVal = filterMap.get('limit') instanceof Integer
                         ? (Integer) filterMap.get('limit')
                         : 20;
+                    // Honour explicit "top N / 上位N" in user input
+                    Matcher topM = Pattern.compile('(?i)top\\s*(\\d+)|上位\\s*(\\d+)').matcher(userInput ?? '');
+                    if (topM.find()) {
+                        String nStr = topM.group(1) != null ? topM.group(1) : topM.group(2);
+                        if (nStr != null) { Integer n = Integer.valueOf(nStr); if (n > 0) limitVal = n; }
+                    }
                     condJson = injectParentFilter(condJson, sObjectType, targetObj, recordId);
                     result.soqlFilterJson = condJson;
                     result.soqlRecords = executeSoqlQuery(targetObj, condJson, null, orderByRaw, limitVal, 0);
@@ -1108,7 +1119,14 @@ public with sharing class FuruAgentController {
                     // If parent filter was injected the ORDER BY should not force Amount DESC
                     Boolean hasInjected = (condJson != null && condJson != '[]');
                     String defaultOrder = hasInjected ? null : 'Amount DESC';
-                    result.soqlRecords = executeSoqlQuery(targetObj, condJson, null, defaultOrder, 20, 0);
+                    // Honour explicit "top N / 上位N" in user input
+                    Integer effectiveLimit = 20;
+                    Matcher topM2 = Pattern.compile('(?i)top\\s*(\\d+)|上位\\s*(\\d+)').matcher(userInput ?? '');
+                    if (topM2.find()) {
+                        String nStr = topM2.group(1) != null ? topM2.group(1) : topM2.group(2);
+                        if (nStr != null) { Integer n = Integer.valueOf(nStr); if (n > 0) effectiveLimit = n; }
+                    }
+                    result.soqlRecords = executeSoqlQuery(targetObj, condJson, null, defaultOrder, effectiveLimit, 0);
                 }
             }
 

@@ -716,6 +716,34 @@
                     </template>
                 </div>
 
+                <!-- Field suggestion chips -->
+                <template lwc:if={hasFieldSuggestions}>
+                    <div class="furu-bar__soql-chip-row">
+                        <span class="furu-bar__soql-chip-row-label">＋</span>
+                        <template for:each={_fieldSuggestions} for:item="chip">
+                            <button key={chip.idx}
+                                    class="furu-bar__suggestion-chip"
+                                    data-api={chip.apiName}
+                                    onclick={handleAddSuggestedField}
+                                    type="button">+ {chip.label}</button>
+                        </template>
+                    </div>
+                </template>
+
+                <!-- Condition suggestion chips -->
+                <template lwc:if={hasCondSuggestions}>
+                    <div class="furu-bar__soql-chip-row">
+                        <span class="furu-bar__soql-chip-row-label">🔍</span>
+                        <template for:each={_condSuggestions} for:item="chip">
+                            <button key={chip.id}
+                                    class="furu-bar__suggestion-chip furu-bar__suggestion-chip--cond"
+                                    data-id={chip.id}
+                                    onclick={handleApplyCondSuggestion}
+                                    type="button">{chip.label}</button>
+                        </template>
+                    </div>
+                </template>
+
                 <!-- Loading overlay -->
                 <template lwc:if={soqlIsLoading}>
                     <div class="furu-bar__soql-loading">
