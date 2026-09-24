@@ -33,21 +33,35 @@ public with sharing class FlashBar_CaseTriageController {
 
     @AuraEnabled(cacheable=true)
     public static Map<String, Object> getCaseContext(Id caseId) {
-        Case targetCase = [
-            SELECT Id, CaseNumber, Subject, Description, Account.SLA__c
-            FROM   Case
-            WHERE  Id = :caseId
-            WITH   USER_MODE
-            LIMIT  1
-        ];
-        return new Map<String, Object>{
-            'caseId'         => targetCase.Id,
-            'subject'        => targetCase.Subject,
-            'description'    => targetCase.Description,
-            'accountSlaTier' => targetCase.Account?.SLA__c != null
-                                    ? targetCase.Account.SLA__c
-                                    : 'Standard'
-        };
+        try {
+            List<Case> matches = [
+                SELECT Id, CaseNumber, Subject, Description, Account.SLA__c
+                FROM   Case
+                WHERE  Id = :caseId
+                WITH   USER_MODE
+                LIMIT  1
+            ];
+            if (matches.isEmpty()) {
+                AuraHandledException notFound = new AuraHandledException('Case not found or not accessible: ' + caseId);
+                notFound.setMessage('Case not found or not accessible: ' + caseId);
+                throw notFound;
+            }
+            Case targetCase = matches[0];
+            return new Map<String, Object>{
+                'caseId'         => targetCase.Id,
+                'subject'        => targetCase.Subject,
+                'description'    => targetCase.Description,
+                'accountSlaTier' => targetCase.Account?.SLA__c != null
+                                        ? targetCase.Account.SLA__c
+                                        : 'Standard'
+            };
+        } catch (AuraHandledException ahe) {
+            throw ahe;
+        } catch (Exception e) {
+            AuraHandledException wrapped = new AuraHandledException('Failed to load case context: ' + e.getMessage());
+            wrapped.setMessage('Failed to load case context: ' + e.getMessage());
+            throw wrapped;
+        }
     }
 
     // ── 2. scoreTriage (Cloudflare Worker callout) ──────────────────────────

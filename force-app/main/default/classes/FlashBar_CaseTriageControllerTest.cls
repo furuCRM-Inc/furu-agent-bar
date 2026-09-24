@@ -75,6 +75,21 @@ private class FlashBar_CaseTriageControllerTest {
         System.assertEquals('Standard', (String) ctx.get('accountSlaTier'), 'No Account linked — should default to Standard');
     }
 
+    @isTest
+    static void testGetCaseContext_notFound_throwsAuraHandledException() {
+        Case c = [SELECT Id FROM Case LIMIT 1];
+        delete c;
+
+        Test.startTest();
+        try {
+            FlashBar_CaseTriageController.getCaseContext(c.Id);
+            System.assert(false, 'Expected AuraHandledException for a deleted/inaccessible case');
+        } catch (AuraHandledException ahe) {
+            System.assert(ahe.getMessage().contains('not found'), ahe.getMessage());
+        }
+        Test.stopTest();
+    }
+
     // ── scoreTriage ──────────────────────────────────────────────────────────
 
     @isTest
