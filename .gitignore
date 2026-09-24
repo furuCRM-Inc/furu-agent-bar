@@ -2,6 +2,9 @@
 .env
 tests/e2e/.auth/
 
+# Claude Code local settings (developer tool, not for public repo)
+.claude/
+
 # Salesforce local state
 .sfdx/
 .sf/

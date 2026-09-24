@@ -88,6 +88,10 @@ public with sharing class FuruAgentController {
         @AuraEnabled public List<Map<String, Object>> soqlRecords; // SOQL_SEARCH result rows
         // CREATE_REPORT / CREATE_DASHBOARD (optional premium — user must connect Claude)
         @AuraEnabled public String             analyticsRequest; // verbatim user request for report/dashboard
+        // Confidence-based Multi-Tiered Threshold routing
+        @AuraEnabled public Double             confidence;       // 0.0–1.0 from Worker
+        @AuraEnabled public List<Map<String,Object>> candidates; // DISAMBIGUATE: interpretation options
+        @AuraEnabled public Boolean            needsConfirmation; // DML confidence < 95% → diff preview
     }
 
     // ── Field insight — public cached read ───────────────────────────────────
@@ -399,6 +403,9 @@ public with sharing class FuruAgentController {
     // Accepts a structured conditions array from the LLM / LWC state and builds
     // a safe, FLS-respecting SOQL query using WITH USER_MODE.
 
+    // Cache: "ParentSObj:ChildSObj" → lookup field API name, resolved dynamically via Schema.
+    private static final Map<String, String> PARENT_CHILD_LOOKUP_CACHE = new Map<String, String>();
+
     private static final Set<String> DATE_LITERALS = new Set<String>{
         'TODAY','YESTERDAY','TOMORROW',
         'THIS_WEEK','LAST_WEEK','NEXT_WEEK',
@@ -416,13 +423,81 @@ public with sharing class FuruAgentController {
         'Case'        => new List<String>{'CaseNumber','Subject','Status','Priority','Account.Name'}
     };
 
+    // Dynamic column defaults for objects not in DEFAULT_SELECT_FIELDS.
+    // Picks the first 5 accessible, non-system, non-formula fields from Schema describe.
+    private static List<String> getDefaultSelectForObject(String sObjType, Map<String, Schema.SObjectField> fieldMap) {
+        if (DEFAULT_SELECT_FIELDS.containsKey(sObjType)) return DEFAULT_SELECT_FIELDS.get(sObjType);
+        Set<String> skip = new Set<String>{
+            'id','isdeleted','ownerid','createddate','createdbyid',
+            'lastmodifieddate','lastmodifiedbyid','systemmodstamp',
+            'lastvieweddate','lastreferenceddate','currencyisocode'
+        };
+        List<String> fields = new List<String>();
+        if (fieldMap.containsKey('name')) {
+            Schema.DescribeFieldResult n = fieldMap.get('name').getDescribe();
+            if (n.isAccessible()) fields.add(n.getName());
+        }
+        for (Schema.SObjectField sf : fieldMap.values()) {
+            if (fields.size() >= 5) break;
+            Schema.DescribeFieldResult dfr = sf.getDescribe();
+            if (!dfr.isAccessible() || dfr.isCalculated() || dfr.isAutoNumber()) continue;
+            String fn = dfr.getName().toLowerCase();
+            if (skip.contains(fn) || fn == 'name') continue;
+            Schema.DisplayType dt = dfr.getType();
+            if (dt == Schema.DisplayType.REFERENCE || dt == Schema.DisplayType.BASE64 ||
+                dt == Schema.DisplayType.ID || dt == Schema.DisplayType.ADDRESS) continue;
+            fields.add(dfr.getName());
+        }
+        return fields.isEmpty() ? new List<String>{'Name'} : fields;
+    }
+
+    // Returns the Schema-derived display label for any sObject (dynamic fallback for custom objects).
+    private static String getSObjectLabel(String sObjectType) {
+        if (String.isBlank(sObjectType)) return sObjectType;
+        if (JA_SOBJECT_LABEL.containsKey(sObjectType)) return JA_SOBJECT_LABEL.get(sObjectType);
+        try {
+            Schema.SObjectType token = Schema.getGlobalDescribe().get(sObjectType);
+            if (token != null) return token.getDescribe().getLabel();
+        } catch (Exception ignored) {}
+        return sObjectType;
+    }
+
+    // Dynamically finds a useful secondary field for SOSL parent-search display.
+    // Prefers well-known identifier fields; falls back to the first accessible string field.
+    private static String findSecondaryField(String sObjectType) {
+        try {
+            Schema.SObjectType token = Schema.getGlobalDescribe().get(sObjectType);
+            if (token == null) return null;
+            Map<String, Schema.SObjectField> fm = token.getDescribe().fields.getMap();
+            for (String preferred : new List<String>{
+                'Email','Phone','BillingCity','Industry','Company',
+                'Title','Department','Status','Subject','Type','Website'
+            }) {
+                Schema.SObjectField sf = fm.get(preferred.toLowerCase());
+                if (sf != null && sf.getDescribe().isAccessible()) return sf.getDescribe().getName();
+            }
+            for (Schema.SObjectField sf : fm.values()) {
+                Schema.DescribeFieldResult dfr = sf.getDescribe();
+                if (!dfr.isAccessible()) continue;
+                String fn = dfr.getName();
+                if (fn == 'Id' || fn == 'Name' || fn.endsWith('Id')) continue;
+                if (dfr.getType() == Schema.DisplayType.STRING || dfr.getType() == Schema.DisplayType.EMAIL
+                    || dfr.getType() == Schema.DisplayType.PHONE) {
+                    return fn;
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
     @AuraEnabled
     public static List<Map<String, Object>> executeSoqlQuery(
         String sObjectType,
         String conditionsJson,      // JSON: [{field, op, value}]
         String selectApiNamesJson,  // JSON: ["Name","Amount","Account.Name"] — null → use defaults
         String orderBy,
-        Integer maxRows
+        Integer maxRows,
+        Integer offsetRows          // null / 0 = first page; >0 = load-more offset
     ) {
         Schema.SObjectType token = Schema.getGlobalDescribe().get(sObjectType);
         if (token == null) throw new AuraHandledException('不明なオブジェクト: ' + sObjectType);
@@ -435,9 +510,7 @@ public with sharing class FuruAgentController {
             catch (Exception ex) { rawSelect = new List<String>(); }
         }
         if (rawSelect == null || rawSelect.isEmpty()) {
-            rawSelect = DEFAULT_SELECT_FIELDS.containsKey(sObjectType)
-                ? DEFAULT_SELECT_FIELDS.get(sObjectType)
-                : new List<String>{'Name'};
+            rawSelect = getDefaultSelectForObject(sObjectType, fieldMap);
         }
 
         Set<String> seen = new Set<String>{'id'};
@@ -446,9 +519,12 @@ public with sharing class FuruAgentController {
             fn = fn.trim();
             if (String.isBlank(fn) || seen.contains(fn.toLowerCase())) continue;
             if (fn.contains('.')) {
-                // Relationship field — check the parent ref field exists
+                // Relationship field — check parent ref field exists (standard or custom __r)
                 String rel = fn.split('\\.')[0].toLowerCase();
-                if (fieldMap.containsKey(rel + 'id') || fieldMap.containsKey(rel)) {
+                Boolean relOk = fieldMap.containsKey(rel + 'id')
+                    || fieldMap.containsKey(rel)
+                    || (rel.endsWith('__r') && fieldMap.containsKey(rel.removeEnd('__r') + '__c'));
+                if (relOk) {
                     selectClause.add(fn);
                     seen.add(fn.toLowerCase());
                 }
@@ -474,13 +550,13 @@ public with sharing class FuruAgentController {
             Object val   = cond.get('value');
             if (String.isBlank(field) || String.isBlank(op)) continue;
 
-            // Validate field (direct or relationship like Account.Name)
+            // Validate field (direct or relationship like Account.Name / MyParent__r.Name)
             String lookupKey = field.contains('.')
                 ? field.split('\\.')[0].toLowerCase()
                 : field.toLowerCase();
             Boolean fieldOk = fieldMap.containsKey(lookupKey)
                 || fieldMap.containsKey(lookupKey + 'id')
-                || lookupKey == 'account' || lookupKey == 'owner' || lookupKey == 'contact';
+                || (lookupKey.endsWith('__r') && fieldMap.containsKey(lookupKey.removeEnd('__r') + '__c'));
             if (!fieldOk) continue;
 
             String clause = buildSoqlCondition(field, op, val);
@@ -489,6 +565,7 @@ public with sharing class FuruAgentController {
 
         // ── Assemble and execute ────────────────────────────────────────────
         Integer lim = (maxRows != null && maxRows > 0 && maxRows <= 50) ? maxRows : 20;
+        Integer off = (offsetRows != null && offsetRows > 0) ? offsetRows : 0;
         String soqlOrderBy = buildSafeOrderBy(orderBy, fieldMap);
 
         String soql = 'SELECT ' + String.join(selectClause, ', ')
@@ -496,7 +573,8 @@ public with sharing class FuruAgentController {
             + (whereParts.isEmpty() ? '' : ' WHERE ' + String.join(whereParts, ' AND '))
             + ' WITH USER_MODE'
             + (String.isNotBlank(soqlOrderBy) ? ' ORDER BY ' + soqlOrderBy : '')
-            + ' LIMIT ' + lim;
+            + ' LIMIT ' + lim
+            + (off > 0 ? ' OFFSET ' + off : '');
 
         List<Map<String, Object>> rows = new List<Map<String, Object>>();
         try {
@@ -595,6 +673,87 @@ public with sharing class FuruAgentController {
         return null;
     }
 
+    /**
+     * When the user is on a parent record page (e.g. Account / Dickenson plc) and
+     * asks for child records (e.g. Opportunities), the Worker may return an empty
+     * filter or use Account.Name = '...' which can miss records.  This helper
+     * injects AccountId = recordId (or the appropriate lookup field) so the query
+     * is always scoped to the current parent — unless the filter already contains
+     * that lookup field.
+     */
+    /**
+     * Dynamically resolves which field on childSObj is a REFERENCE to parentSObj.
+     * Returns the first matching lookup API name, or null if none found.
+     * Result is cached per transaction to avoid repeated describe calls.
+     */
+    private static String resolveParentLookupField(String parentSObj, String childSObj) {
+        String cacheKey = parentSObj + ':' + childSObj;
+        if (PARENT_CHILD_LOOKUP_CACHE.containsKey(cacheKey)) {
+            return PARENT_CHILD_LOOKUP_CACHE.get(cacheKey);
+        }
+        Schema.SObjectType childToken = Schema.getGlobalDescribe().get(childSObj);
+        if (childToken == null) {
+            PARENT_CHILD_LOOKUP_CACHE.put(cacheKey, null);
+            return null;
+        }
+        String parentLower = parentSObj.toLowerCase();
+        for (Schema.SObjectField sf : childToken.getDescribe().fields.getMap().values()) {
+            Schema.DescribeFieldResult dfr = sf.getDescribe();
+            if (dfr.getType() != Schema.DisplayType.REFERENCE) continue;
+            for (Schema.SObjectType ref : dfr.getReferenceTo()) {
+                if (ref.getDescribe().getName().toLowerCase() == parentLower) {
+                    String found = dfr.getName();
+                    PARENT_CHILD_LOOKUP_CACHE.put(cacheKey, found);
+                    return found;
+                }
+            }
+        }
+        PARENT_CHILD_LOOKUP_CACHE.put(cacheKey, null);
+        return null;
+    }
+
+    /**
+     * When the user is on a parent record page (e.g. Account / Dickenson plc) and
+     * asks for child records (e.g. Opportunities), the Worker may return an empty
+     * filter or use Account.Name = '...' which can miss records.  This helper
+     * injects the parent lookup field = recordId so the query is always scoped to
+     * the current parent — unless the filter already contains that lookup field.
+     * Works for any parent/child object pair by resolving the lookup dynamically.
+     */
+    private static String injectParentFilter(
+        String condJson,
+        String parentSObj,
+        String childSObj,
+        String parentRecordId
+    ) {
+        if (String.isBlank(parentRecordId) || String.isBlank(parentSObj) || String.isBlank(childSObj)) return condJson;
+        if (parentSObj == childSObj) return condJson;
+
+        String lookupField = resolveParentLookupField(parentSObj, childSObj);
+        if (String.isBlank(lookupField)) return condJson;
+
+        List<Object> conditions;
+        try { conditions = (List<Object>) JSON.deserializeUntyped(condJson ?? '[]'); }
+        catch (Exception ex) { conditions = new List<Object>(); }
+
+        // Skip injection if Worker already filtered by this lookup or by the parent's Name field
+        String lookupLower = lookupField.toLowerCase();
+        String parentLower = parentSObj.toLowerCase();
+        for (Object cRaw : conditions) {
+            if (!(cRaw instanceof Map<String, Object>)) continue;
+            String f = String.valueOf(((Map<String, Object>) cRaw).get('field') ?? '').toLowerCase();
+            if (f == lookupLower || f.startsWith(parentLower + '.')) return condJson;
+        }
+
+        // Inject the parent record ID as a filter condition
+        conditions.add(new Map<String, Object>{
+            'field' => lookupField,
+            'op'    => 'eq',
+            'value' => parentRecordId
+        });
+        return JSON.serialize(conditions);
+    }
+
     // ── Parent record search (for GUIDE_CREATE parent selector) ─────────────
 
     public class ParentCandidate {
@@ -614,14 +773,11 @@ public with sharing class FuruAgentController {
         safeTerm = String.escapeSingleQuotes(safeTerm) + '*';
 
         String sObjSafe = String.escapeSingleQuotes(parentSObjectType);
-        // Determine a useful secondary field (Industry for Account, Email for Contact/Lead)
-        String subField = 'Id';
-        if      (parentSObjectType == 'Account') subField = 'BillingCity';
-        else if (parentSObjectType == 'Contact') subField = 'Email';
-        else if (parentSObjectType == 'Lead')    subField = 'Company';
+        String subField = findSecondaryField(parentSObjectType);
+        String returningFields = subField != null ? 'Id, Name, ' + subField : 'Id, Name';
 
         String sosl = 'FIND \'' + safeTerm + '\' IN NAME FIELDS RETURNING ' +
-                      sObjSafe + '(Id, Name, ' + subField + ' LIMIT 3)';
+                      sObjSafe + '(' + returningFields + ' LIMIT 3)';
         List<List<SObject>> raw;
         try {
             raw = Search.query(sosl);
@@ -634,7 +790,7 @@ public with sharing class FuruAgentController {
                 ParentCandidate c = new ParentCandidate();
                 c.id   = String.valueOf(rec.get('Id'));
                 c.name = String.valueOf(rec.get('Name') ?? '');
-                Object sub = rec.get(subField);
+                Object sub = subField != null ? rec.get(subField) : null;
                 c.sub  = sub != null ? String.valueOf(sub) : '';
                 out.add(c);
             }
@@ -738,6 +894,45 @@ public with sharing class FuruAgentController {
             // 3. Map response to AgentAction
             result = mapToAction(workerResponse, sObjectType, recordId);
 
+            // ── 3a. Multi-Tiered Confidence Threshold (Raycast / Linear pattern) ──────
+            //
+            //   ≥ 85%  →  Direct execution  (proceed as normal)
+            //  50–84%  →  DISAMBIGUATE: show "Did You Mean?" candidates, no data written
+            //   < 50%  →  SOSL keyword fallback: discard AI intent entirely
+            //  DML < 95% → needsConfirmation = true → diff-preview guard before write
+            {
+                Double conf = result.confidence != null ? result.confidence : 1.0;
+                Boolean isDml = (result.intent == 'UPDATE_RECORD');
+
+                if (conf < 0.5) {
+                    // Low confidence — abandon AI interpretation, run SOSL
+                    String rawQ = String.isNotBlank((String) workerResponse.get('search_query'))
+                        ? (String) workerResponse.get('search_query')
+                        : userInput;
+                    result.intent        = 'SEARCH';
+                    result.searchResults = runSearch(rawQ, null, null);
+                    result.message = i18n(
+                        'Low confidence — showing keyword results for "' + userInput + '"',
+                        '確信度が低いため「' + userInput + '」のキーワード検索に切り替えました',
+                        lang
+                    );
+                } else if (conf < 0.85 && !isDml
+                           && result.candidates != null && !result.candidates.isEmpty()) {
+                    // Medium confidence with candidates — ask user to choose
+                    result.intent = 'DISAMBIGUATE';
+                    if (String.isBlank(result.message)) {
+                        result.message = i18n(
+                            'Did you mean…? Tap to select',
+                            'もしかしてこちらですか？（選んで実行）',
+                            lang
+                        );
+                    }
+                } else if (isDml && conf < 0.95) {
+                    // DML below 95% — require user confirmation (diff preview in LWC)
+                    result.needsConfirmation = true;
+                }
+            }
+
             // 3b. Resolve __copyAddress signal (e.g. copy billing → shipping)
             if (result.fields != null && result.fields.containsKey('__copyAddress')) {
                 String copyDir = (String) result.fields.remove('__copyAddress');
@@ -792,7 +987,7 @@ public with sharing class FuruAgentController {
                     result.guideFields  = getObjectFieldInsightsInternal(sObjectType);
                 }
                 // Always use the clean Apex template — never the LLM's raw message string
-                String sobjLabel = isJa(lang) ? (JA_SOBJECT_LABEL.containsKey(targetSObj) ? JA_SOBJECT_LABEL.get(targetSObj) : targetSObj) : targetSObj;
+                String sobjLabel = isJa(lang) ? getSObjectLabel(targetSObj) : targetSObj;
                 result.message = i18n(
                     'Field guide for ' + sobjLabel,
                     sobjLabel + ' のフィールドガイド',
@@ -862,7 +1057,8 @@ public with sharing class FuruAgentController {
             }
 
             // 4. If SEARCH — run SOSL server-side
-            if (result.intent == 'SEARCH') {
+            // Guard: skip if 3a already populated searchResults (low-confidence fallback path)
+            if (result.intent == 'SEARCH' && result.searchResults == null) {
                 result.searchResults = runSearch(
                     (String) workerResponse.get('search_query'),
                     (String) workerResponse.get('search_sobject'),
@@ -901,8 +1097,18 @@ public with sharing class FuruAgentController {
                     Integer limitVal = filterMap.get('limit') instanceof Integer
                         ? (Integer) filterMap.get('limit')
                         : 20;
+                    condJson = injectParentFilter(condJson, sObjectType, targetObj, recordId);
                     result.soqlFilterJson = condJson;
-                    result.soqlRecords = executeSoqlQuery(targetObj, condJson, null, orderByRaw, limitVal);
+                    result.soqlRecords = executeSoqlQuery(targetObj, condJson, null, orderByRaw, limitVal, 0);
+                } else {
+                    // filterRaw is null — unconditional query (e.g. "show top revenue opportunities"
+                    // with no WHERE conditions, or query for child records from a parent page).
+                    String condJson = injectParentFilter('[]', sObjectType, targetObj, recordId);
+                    result.soqlFilterJson = condJson;
+                    // If parent filter was injected the ORDER BY should not force Amount DESC
+                    Boolean hasInjected = (condJson != null && condJson != '[]');
+                    String defaultOrder = hasInjected ? null : 'Amount DESC';
+                    result.soqlRecords = executeSoqlQuery(targetObj, condJson, null, defaultOrder, 20, 0);
                 }
             }
 
@@ -938,12 +1144,19 @@ public with sharing class FuruAgentController {
         String userLanguage
     ) {
         Map<String, Object> payload = new Map<String, Object>{
-            'user_input'   => userInput,
-            'sObjectType'  => sObjectType,
-            'recordId'     => recordId,
-            'pageType'     => pageType,
-            'field_schema' => fieldLabels,
-            'userLanguage' => userLanguage
+            'user_input'    => userInput,
+            'sObjectType'   => sObjectType,
+            'recordId'      => recordId,
+            'pageType'      => pageType,
+            'field_schema'  => fieldLabels,
+            'userLanguage'  => userLanguage,
+            // Expose relationship metadata so the Worker can generate parent-scoped
+            // SOQL conditions directly (e.g. AccountId = recordId) when the user
+            // asks for child records from a parent record page.
+            'parent_context' => String.isNotBlank(recordId) ? new Map<String, Object>{
+                'sObjectType' => sObjectType,
+                'recordId'    => recordId
+            } : null
         };
 
         HttpRequest req = new HttpRequest();
@@ -1001,6 +1214,21 @@ public with sharing class FuruAgentController {
         if (rc instanceof Integer)      a.remainingCredits = (Integer) rc;
         else if (rc instanceof Long)    a.remainingCredits = ((Long) rc).intValue();
         else if (rc instanceof Decimal) a.remainingCredits = ((Decimal) rc).intValue();
+
+        // Confidence score (0.0–1.0)
+        Object confRaw = r.get('confidence');
+        if      (confRaw instanceof Decimal) a.confidence = ((Decimal) confRaw).doubleValue();
+        else if (confRaw instanceof Double)  a.confidence = (Double)  confRaw;
+        else if (confRaw instanceof Integer) a.confidence = ((Integer) confRaw) + 0.0;
+
+        // Disambiguation candidates (medium-confidence path)
+        Object candsRaw = r.get('candidates');
+        if (candsRaw instanceof List<Object>) {
+            a.candidates = new List<Map<String,Object>>();
+            for (Object c : (List<Object>) candsRaw) {
+                if (c instanceof Map<String, Object>) a.candidates.add((Map<String,Object>) c);
+            }
+        }
 
         // No recordId yet — run SOQL by name to resolve it.
         // If LLM didn't specify sObject, try Account first (most common navigation target).

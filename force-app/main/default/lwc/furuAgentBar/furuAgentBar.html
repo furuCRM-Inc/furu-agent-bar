@@ -239,23 +239,48 @@
                         </div>
                     </template>
                 </div>
-                <!-- Edit mode — field selector -->
+                <!-- Edit mode — incremental search + field selector + value editor -->
                 <template lwc:if={_summaryEditing}>
+                    <div class="furu-bar__vedit-search-wrap">
+                        <input class="furu-bar__vedit-search"
+                               type="text"
+                               placeholder={veditSearchPlaceholder}
+                               value={_fieldSearchKw}
+                               oninput={handleFieldSearchInput} />
+                    </div>
                     <div class="furu-bar__summary-editor">
-                        <template for:each={_summaryAllFields} for:item="f">
-                            <label key={f.apiName} class="furu-bar__summary-check-row">
+                        <template for:each={filteredEditFields} for:item="f">
+                            <div key={f.apiName} class="furu-bar__vedit-row">
                                 <input type="checkbox"
                                        checked={f.isChecked}
                                        data-apiname={f.apiName}
+                                       class="furu-bar__vedit-checkbox"
                                        onchange={handleSummaryFieldToggle} />
-                                <span class="furu-bar__summary-check-label">{f.label}</span>
+                                <span class="furu-bar__vedit-label">
+                                    {f.label}
+                                    <template lwc:if={f.isDirty}>
+                                        <span class="furu-bar__vedit-dirty-badge" title="変更あり">✏️</span>
+                                    </template>
+                                </span>
                                 <template lwc:if={f.isRequired}>
                                     <span class="furu-bar__summary-req">必須</span>
                                 </template>
-                                <template lwc:if={f.displayValue}>
-                                    <span class="furu-bar__summary-check-value">{f.displayValue}</span>
+                                <template lwc:if={f.isTextField}>
+                                    <input class="furu-bar__vedit-input"
+                                           type={f.inputType}
+                                           value={f.draftValue}
+                                           placeholder={f.displayValue}
+                                           data-apiname={f.apiName}
+                                           oninput={handleFieldDraftChange} />
                                 </template>
-                            </label>
+                                <template lwc:if={f.isCheckboxField}>
+                                    <input class="furu-bar__vedit-toggle"
+                                           type="checkbox"
+                                           checked={f.draftValueBool}
+                                           data-apiname={f.apiName}
+                                           onchange={handleFieldDraftChange} />
+                                </template>
+                            </div>
                         </template>
                     </div>
                     <div class="furu-bar__summary-edit-actions">
@@ -398,6 +423,28 @@
                     <button class="furu-bar__pill-btn" onclick={handleUndo}>{i18n.undo}</button>
                 </template>
                 <button class="furu-bar__pill-btn furu-bar__pill-btn--muted" onclick={dismissStatus}>✕</button>
+            </div>
+        </template>
+
+        <!-- ── Disambiguation Card ("Did You Mean?") ────────────────── -->
+        <template lwc:if={hasDisambiguate}>
+            <div class="furu-bar__disambig">
+                <div class="furu-bar__disambig-header">
+                    <span class="furu-bar__disambig-icon">🤔</span>
+                    <span class="furu-bar__disambig-msg">{disambiguateMessage}</span>
+                    <button class="furu-bar__pill-btn furu-bar__pill-btn--muted"
+                            onclick={dismissDisambiguate} type="button">✕</button>
+                </div>
+                <ul class="furu-bar__disambig-list">
+                    <template for:each={disambiguateCandidates} for:item="c">
+                        <li key={c.key} class="furu-bar__disambig-item">
+                            <button class="furu-bar__disambig-btn"
+                                    data-idx={c.key}
+                                    onclick={handleDisambiguateSelect}
+                                    type="button">{c.label}</button>
+                        </li>
+                    </template>
+                </ul>
             </div>
         </template>
 
@@ -820,6 +867,26 @@
                     </template>
                 </template>
 
+                <!-- Empty state — shown when query returned 0 records -->
+                <template lwc:if={soqlIsEmpty}>
+                    <p class="furu-bar__soql-empty">{soqlEmptyLabel}</p>
+                </template>
+
+                <!-- Load More button — shown when page was full (hasMore = true) -->
+                <template lwc:if={soqlHasMore}>
+                    <div class="furu-bar__soql-more-wrap">
+                        <button class="furu-bar__soql-more-btn"
+                                onclick={handleLoadMore}
+                                disabled={soqlIsLoadingMore}
+                                type="button">
+                            <template lwc:if={soqlIsLoadingMore}>
+                                <div class="furu-bar__spinner furu-bar__spinner--sm"></div>
+                            </template>
+                            <template lwc:else>{soqlLoadMoreLabel}</template>
+                        </button>
+                    </div>
+                </template>
+
             </div>
         </template>
 
@@ -865,6 +932,15 @@
                             </li>
                         </template>
                     </ul>
+                    <div class="furu-bar__csv-ext-key-row">
+                        <label class="furu-bar__csv-ext-key-label" for="csvExtKeyInput">🔑 外部キーでUpsert（任意）</label>
+                        <input  class="furu-bar__csv-ext-key-input"
+                                id="csvExtKeyInput"
+                                type="text"
+                                placeholder="例: CSV_External_Key__c"
+                                value={_csvExternalKeyField}
+                                onchange={handleCsvExtKeyChange} />
+                    </div>
                     <div class="furu-bar__csv-actions">
                         <button class="furu-bar__action-btn furu-bar__action-btn--save" onclick={handleCsvImport} type="button">
                             🚀 {csvTotalRows}件を一括インポート

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtlClntAppOauthConfigurablePolicies xmlns="http://soap.sforce.com/2006/04/metadata">
+    <externalClientApplication>FlashBar_E2E_JA</externalClientApplication>
+    <ipRelaxationPolicyType>Bypass</ipRelaxationPolicyType>
+    <isClientCredentialsFlowEnabled>true</isClientCredentialsFlowEnabled>
+    <clientCredentialsFlowUser>flashbar.test.ja@orgfarm-ce649a3945.com</clientCredentialsFlowUser>
+    <label>FlashBar E2E JA OAuth Policy</label>
+    <permittedUsersPolicyType>AllSelfAuthorized</permittedUsersPolicyType>
+</ExtlClntAppOauthConfigurablePolicies>

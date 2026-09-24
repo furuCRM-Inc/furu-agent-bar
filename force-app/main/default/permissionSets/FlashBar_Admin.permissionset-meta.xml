@@ -25,20 +25,10 @@
         <viewAllRecords>true</viewAllRecords>
     </objectPermissions>
 
-    <!-- FlashBar_Nav_Item__c field permissions -->
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>FlashBar_Nav_Item__c.Label__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
+    <!-- FlashBar_Nav_Item__c field permissions (Label__c and Target_Type__c are required — no FLS entry allowed) -->
     <fieldPermissions>
         <editable>true</editable>
         <field>FlashBar_Nav_Item__c.User__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>FlashBar_Nav_Item__c.Target_Type__c</field>
         <readable>true</readable>
     </fieldPermissions>
     <fieldPermissions>
@@ -107,6 +97,10 @@
     <!-- Apex Class Access: all runtime + admin classes -->
     <classAccesses>
         <apexClass>FlashBarAdminController</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>FlashBarAgentforceRuntime</apexClass>
         <enabled>true</enabled>
     </classAccesses>
     <classAccesses>

@@ -1570,6 +1570,28 @@
     flex-shrink:    0;
 }
 
+.furu-bar__csv-ext-key-row {
+    display:     flex;
+    align-items: center;
+    gap:         6px;
+    padding:     6px 10px;
+    border-top:  1px dashed var(--border-color);
+}
+.furu-bar__csv-ext-key-label {
+    font-size:   0.75rem;
+    color:       var(--text-muted, #888);
+    white-space: nowrap;
+}
+.furu-bar__csv-ext-key-input {
+    flex:        1;
+    font-size:   0.78rem;
+    padding:     3px 6px;
+    border:      1px solid var(--border-color);
+    border-radius: 4px;
+    background:  var(--input-bg, #fff);
+    color:       var(--text-primary);
+    min-width:   0;
+}
 .furu-bar__csv-actions {
     display:    flex;
     gap:        7px;
@@ -1758,10 +1780,93 @@
 .furu-bar__soql-field-rm:hover { color: #f87171; }
 
 /* Loading */
+/* ── Disambiguation card ("Did You Mean?") ───────────────────────────── */
+.furu-bar__disambig {
+    background:    var(--furu-card-bg, #fff);
+    border:        1px solid var(--furu-border-accent, #f0c040);
+    border-radius: var(--furu-radius, 8px);
+    margin-top:    6px;
+    padding:       10px 12px 8px;
+}
+.furu-bar__disambig-header {
+    display:       flex;
+    align-items:   center;
+    gap:           6px;
+    margin-bottom: 8px;
+}
+.furu-bar__disambig-icon { font-size: 0.9rem; }
+.furu-bar__disambig-msg  {
+    flex:        1;
+    font-size:   0.78rem;
+    font-weight: 600;
+    color:       var(--furu-text, #333);
+}
+.furu-bar__disambig-list {
+    list-style:     none;
+    margin:         0;
+    padding:        0;
+    display:        flex;
+    flex-direction: column;
+    gap:            4px;
+}
+.furu-bar__disambig-btn {
+    width:         100%;
+    text-align:    left;
+    background:    var(--furu-bg, #fafafa);
+    border:        1px solid var(--furu-border, #e0e0e0);
+    border-radius: 6px;
+    padding:       8px 10px;
+    font-size:     0.78rem;
+    color:         var(--furu-text, #333);
+    cursor:        pointer;
+    transition:    background 0.12s, border-color 0.12s;
+}
+.furu-bar__disambig-btn:hover {
+    background:   var(--furu-hover, #f0f4ff);
+    border-color: var(--furu-accent, #4a90e2);
+    color:        var(--furu-accent, #4a90e2);
+}
+
 .furu-bar__soql-loading {
     display:         flex;
     justify-content: center;
     padding:         12px;
+}
+
+.furu-bar__soql-empty {
+    margin:      12px 0;
+    padding:     10px 12px;
+    color:       var(--furu-text-muted, #888);
+    font-size:   0.8rem;
+    text-align:  center;
+}
+
+.furu-bar__soql-more-wrap {
+    display:     flex;
+    justify-content: center;
+    padding:     6px 0 2px;
+}
+
+.furu-bar__soql-more-btn {
+    background:    rgba(99,102,241,0.12);
+    border:        1px solid rgba(99,102,241,0.3);
+    border-radius: var(--radius-md);
+    color:         #a5b4fc;
+    cursor:        pointer;
+    font-size:     11px;
+    font-weight:   500;
+    padding:       5px 16px;
+    transition:    background var(--transition-fast), border-color var(--transition-fast);
+    min-width:     100px;
+    text-align:    center;
+}
+.furu-bar__soql-more-btn:hover:not(:disabled) {
+    background:    rgba(99,102,241,0.22);
+    border-color:  rgba(99,102,241,0.6);
+}
+.furu-bar__soql-more-btn:disabled {
+    opacity: 0.5;
+    cursor:  not-allowed;
 }
 
 /* Result list */
@@ -2337,6 +2442,77 @@
     gap:        6px;
     margin-top: 2px;
 }
+
+/* Value-edit mode — incremental search + inline inputs */
+.furu-bar__vedit-search-wrap {
+    margin-bottom: 6px;
+}
+
+.furu-bar__vedit-search {
+    width:         100%;
+    box-sizing:    border-box;
+    background:    rgba(255,255,255,0.06);
+    border:        1px solid rgba(99,102,241,0.35);
+    border-radius: 5px;
+    color:         var(--text-primary);
+    font-size:     11px;
+    padding:       5px 8px;
+    outline:       none;
+    transition:    border-color var(--transition-fast);
+}
+.furu-bar__vedit-search:focus {
+    border-color: var(--furu-accent, #6366f1);
+}
+.furu-bar__vedit-search::placeholder {
+    color: var(--text-muted, rgba(255,255,255,0.3));
+}
+
+.furu-bar__vedit-row {
+    display:     flex;
+    align-items: center;
+    gap:         5px;
+    font-size:   11px;
+    padding:     3px 2px;
+    border-radius: 3px;
+}
+.furu-bar__vedit-row:hover { background: rgba(255,255,255,0.03); }
+
+.furu-bar__vedit-checkbox { flex-shrink: 0; cursor: pointer; }
+
+.furu-bar__vedit-label {
+    flex:          1;
+    color:         var(--text-primary);
+    overflow:      hidden;
+    text-overflow: ellipsis;
+    white-space:   nowrap;
+    min-width:     60px;
+    max-width:     90px;
+    display:       flex;
+    align-items:   center;
+    gap:           3px;
+}
+
+.furu-bar__vedit-dirty-badge { font-size: 10px; flex-shrink: 0; }
+
+.furu-bar__vedit-input {
+    flex:          1;
+    background:    rgba(255,255,255,0.07);
+    border:        1px solid rgba(255,255,255,0.12);
+    border-radius: 4px;
+    color:         var(--text-primary);
+    font-size:     11px;
+    padding:       3px 6px;
+    outline:       none;
+    min-width:     0;
+    transition:    border-color var(--transition-fast);
+}
+.furu-bar__vedit-input:focus {
+    border-color: var(--furu-accent, #6366f1);
+    background:   rgba(99,102,241,0.08);
+}
+.furu-bar__vedit-input::placeholder { color: var(--text-muted, rgba(255,255,255,0.25)); }
+
+.furu-bar__vedit-toggle { flex-shrink: 0; cursor: pointer; }
 
 /* ── Claude OAuth settings section ─────────────────────────────────────── */
 .furu-bar__modal-claude {

@@ -1,0 +1,13 @@
+{
+  "orgName": "FlashBar AI Dev",
+  "edition": "Developer",
+  "features": ["EnableSetPasswordInApi"],
+  "settings": {
+    "languageSettings": {
+      "userLanguage": "en_US"
+    },
+    "lightningExperienceSettings": {
+      "enableLightningExperience": true
+    }
+  }
+}

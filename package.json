@@ -1,8 +1,10 @@
 {
-  "name": "furu-agent-bar-e2e",
+  "name": "flashbar-ai",
   "version": "1.0.0",
+  "description": "FlashBar AI — Sub-second Cmd+K command palette and AI acceleration layer for Salesforce",
   "private": true,
   "scripts": {
+    "lint": "eslint force-app/main/default/lwc --ext .js",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "playwright test --debug",
@@ -10,7 +12,10 @@
     "test:e2e:install": "playwright install chromium"
   },
   "devDependencies": {
+    "@eslint/js": "^9.0.0",
     "@playwright/test": "^1.63.0",
-    "dotenv": "^16.6.1"
+    "@salesforce/eslint-config-lwc": "^3.6.0",
+    "dotenv": "^16.6.1",
+    "eslint": "^9.0.0"
   }
 }

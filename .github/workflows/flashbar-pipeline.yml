@@ -1,0 +1,214 @@
+name: FlashBar AI CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+      - 'release/**'
+  pull_request:
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # ===========================================================================
+  # STAGE 1: Code Quality — LWC Lint
+  # ===========================================================================
+  lint:
+    name: LWC Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npm run lint
+
+  # ===========================================================================
+  # STAGE 2: Scratch Org — Apex Deploy + Test (Pull Requests)
+  # ===========================================================================
+  apex-test:
+    name: Apex Tests (Scratch Org)
+    needs: lint
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SF CLI
+        run: npm install -g @salesforce/cli@latest
+
+      - name: Authenticate Dev Hub
+        run: |
+          echo "${{ secrets.SFDX_AUTH_URL }}" > auth.txt
+          sf org login sfdx-url --sfdx-url-file auth.txt --set-default-dev-hub --alias devhub
+          rm auth.txt
+
+      - name: Create Scratch Org
+        run: |
+          sf org create scratch \
+            --definition-file config/project-scratch-def.json \
+            --alias ci-org \
+            --wait 15 \
+            --duration-days 1 \
+            --set-default
+
+      - name: Deploy Source
+        run: sf project deploy start --target-org ci-org --ignore-warnings
+
+      - name: Assign Permission Sets
+        run: |
+          sf org assign permset --name FlashBar_User --target-org ci-org
+          sf org assign permset --name FlashBar_Admin --target-org ci-org
+
+      - name: Run Apex Tests
+        run: |
+          sf apex run test \
+            --target-org ci-org \
+            --test-level RunLocalTests \
+            --code-coverage \
+            --result-format human \
+            --wait 20
+
+      - name: Delete Scratch Org
+        if: always()
+        run: sf org delete scratch --target-org ci-org --no-prompt
+
+  # ===========================================================================
+  # STAGE 3: Build Unlocked Package Version (release/** branches)
+  #
+  # Prerequisites (one-time setup by repo admin):
+  #   sf package create --name "FlashBar AI" --package-type Unlocked \
+  #     --path force-app --target-dev-hub devhub --no-namespace
+  # Then add the returned package ID to sfdx-project.json packageAliases.
+  # ===========================================================================
+  build-package:
+    name: Build Unlocked Package
+    needs: lint
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-latest
+    outputs:
+      subscriber_id: ${{ steps.create_version.outputs.subscriber_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SF CLI
+        run: npm install -g @salesforce/cli@latest
+
+      - name: Authenticate Dev Hub
+        run: |
+          echo "${{ secrets.SFDX_AUTH_URL }}" > auth.txt
+          sf org login sfdx-url --sfdx-url-file auth.txt --set-default-dev-hub --alias devhub
+          rm auth.txt
+
+      - name: Create Package Version
+        id: create_version
+        run: |
+          RESULT=$(sf package version create \
+            --package "FlashBar AI" \
+            --installation-key-bypass \
+            --wait 30 \
+            --json)
+          echo "$RESULT"
+          SUBSCRIBER_ID=$(echo "$RESULT" | jq -r '.result.SubscriberPackageVersionId')
+          echo "subscriber_id=$SUBSCRIBER_ID" >> "$GITHUB_OUTPUT"
+          echo "Created package version: $SUBSCRIBER_ID"
+
+      - name: Smoke-test Install in Scratch Org
+        run: |
+          SUBSCRIBER_ID="${{ steps.create_version.outputs.subscriber_id }}"
+          sf org create scratch \
+            --definition-file config/project-scratch-def.json \
+            --alias install-test-org \
+            --wait 15 \
+            --duration-days 1
+          sf package install \
+            --package "$SUBSCRIBER_ID" \
+            --target-org install-test-org \
+            --wait 15 \
+            --no-prompt
+          sf apex run test \
+            --target-org install-test-org \
+            --test-level RunLocalTests \
+            --wait 20
+          sf org delete scratch --target-org install-test-org --no-prompt
+
+      - name: Deploy Cloudflare Worker (Staging)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          environment: 'staging'
+
+  # ===========================================================================
+  # STAGE 4: Production Release (main branch)
+  # ===========================================================================
+  release:
+    name: Production Release
+    needs: lint
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SF CLI
+        run: npm install -g @salesforce/cli@latest
+
+      - name: Authenticate Dev Hub
+        run: |
+          echo "${{ secrets.SFDX_AUTH_URL }}" > auth.txt
+          sf org login sfdx-url --sfdx-url-file auth.txt --set-default-dev-hub --alias devhub
+          rm auth.txt
+
+      - name: Deploy Cloudflare Worker (Production)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          environment: 'production'
+
+      - name: Get Latest Package Version
+        id: get_version
+        run: |
+          LATEST=$(sf package version list \
+            --packages "FlashBar AI" \
+            --order-by CreatedDate \
+            --json | jq -r '.result[-1].SubscriberPackageVersionId // empty')
+          echo "subscriber_id=$LATEST" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v1.0.${{ github.run_number }}"
+          name: "FlashBar AI v1.0.${{ github.run_number }}"
+          body: |
+            ## FlashBar AI Release v1.0.${{ github.run_number }}
+
+            ### 1-Click Install
+
+            | Org Type | Link |
+            |---|---|
+            | Production / Developer | [Install](https://login.salesforce.com/packaging/installPackage.apexp?p0=${{ steps.get_version.outputs.subscriber_id }}) |
+            | Sandbox | [Install](https://test.salesforce.com/packaging/installPackage.apexp?p0=${{ steps.get_version.outputs.subscriber_id }}) |
+
+            **Package Version ID:** `${{ steps.get_version.outputs.subscriber_id }}`
+
+            ### What's New
+            See [CHANGELOG](https://github.com/furuCRM-Inc/furu-agent-bar/blob/main/CHANGELOG.md) for details.
+
+            ### Post-Install
+            1. Assign the `FlashBar_User` permission set to your users
+            2. (Optional) Assign `FlashBar_Admin` for rule management
+            3. Add `c-furu-agent-bar` to a Lightning App Utility Bar
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

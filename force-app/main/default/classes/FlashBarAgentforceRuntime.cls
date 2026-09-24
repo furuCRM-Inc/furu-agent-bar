@@ -100,7 +100,8 @@ public with sharing class FlashBarAgentforceRuntime {
             p.conditionsJson ?? '[]',
             null,          // selectApiNamesJson — use defaults
             p.orderBy,
-            lim
+            lim,
+            0
         );
 
         Integer n = records.size();
@@ -129,7 +130,8 @@ public with sharing class FlashBarAgentforceRuntime {
             p.conditionsJson ?? '[]',
             p.fieldsJson,
             p.orderBy,
-            p.limitRows != null ? p.limitRows : 200
+            p.limitRows != null ? p.limitRows : 200,
+            0
         );
 
         if (targetRows.isEmpty()) {
@@ -261,19 +263,47 @@ public with sharing class FlashBarAgentforceRuntime {
     // the Worker can cache them and validate SOQL fields without calling Salesforce.
     // Called once per sObject per session; Worker KV TTL = 1 hour.
 
-    @AuraEnabled(cacheable=true)
-    public static List<String> getSchemaForWorkerKv(String sObjectType) {
-        if (String.isBlank(sObjectType)) return new List<String>();
+    public class FieldSchemaMeta {
+        @AuraEnabled public String       apiName;
+        @AuraEnabled public String       label;
+        @AuraEnabled public String       fieldType;
+        @AuraEnabled public List<String> referenceTo;  // non-null for REFERENCE fields
+        @AuraEnabled public Boolean      isCreateable;
+        @AuraEnabled public Boolean      isUpdateable;
+    }
+
+    /**
+     * Returns rich field schema for Worker KV seeding.
+     * Includes lookup relationship metadata (referenceTo) so the Worker can
+     * generate correct parent-scoped SOQL conditions (e.g. AccountId = recordId)
+     * instead of relying on cross-object Name traversal (Account.Name = '...').
+     */
+    @AuraEnabled
+    public static List<FieldSchemaMeta> getSchemaForWorkerKv(String sObjectType) {
+        if (String.isBlank(sObjectType)) return new List<FieldSchemaMeta>();
         Schema.SObjectType token = Schema.getGlobalDescribe().get(sObjectType);
-        if (token == null) return new List<String>();
+        if (token == null) return new List<FieldSchemaMeta>();
 
         Map<String, Schema.SObjectField> fieldMap = token.getDescribe().fields.getMap();
-        List<String> accessible = new List<String>();
-        for (String apiName : fieldMap.keySet()) {
-            Schema.DescribeFieldResult dfr = fieldMap.get(apiName).getDescribe();
-            if (dfr.isAccessible()) accessible.add(dfr.getName());
+        List<FieldSchemaMeta> result = new List<FieldSchemaMeta>();
+        for (Schema.SObjectField sf : fieldMap.values()) {
+            Schema.DescribeFieldResult dfr = sf.getDescribe();
+            if (!dfr.isAccessible()) continue;
+            FieldSchemaMeta m = new FieldSchemaMeta();
+            m.apiName     = dfr.getName();
+            m.label       = dfr.getLabel();
+            m.fieldType   = String.valueOf(dfr.getType());
+            m.isCreateable = dfr.isCreateable();
+            m.isUpdateable = dfr.isUpdateable();
+            if (dfr.getType() == Schema.DisplayType.REFERENCE) {
+                m.referenceTo = new List<String>();
+                for (Schema.SObjectType ref : dfr.getReferenceTo()) {
+                    m.referenceTo.add(ref.getDescribe().getName());
+                }
+            }
+            result.add(m);
         }
-        return accessible;
+        return result;
     }
 
     // ── Custom sObject catalog for Jev dynamic criteria ───────────────────────

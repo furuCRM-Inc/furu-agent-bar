@@ -220,8 +220,10 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             this.searchResults   = [];
             this._loadSummary(newSObj, this._recordId);
         } else if (!this._recordId && this._summaryResult) {
-            this._summaryResult  = null;
-            this._summaryEditing = false;
+            this._summaryResult    = null;
+            this._summaryEditing   = false;
+            this._fieldSearchKw    = '';
+            this._draftValues      = {};
         }
     }
 
@@ -266,26 +268,34 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     @track _contextFields     = [];
     @track _contextRules      = [];
     // SOQL smart search
-    @track _soqlQuery         = null;   // { sObject, conditions, orderBy, limit, selectFields, records, summary, isLoading }
+    @track _soqlQuery         = null;   // { sObject, conditions, orderBy, limit, selectFields, records, summary, isLoading, hasMore, isLoadingMore }
     @track _savedQueries      = [];     // personal shortcuts from localStorage
     @track _recentRecords     = [];     // from RecentlyViewed SOQL
     @track _recentPrompts     = [];     // from localStorage
     @track _viewMode          = 'card'; // 'card' | 'table'
     _isWideMode               = false;
     _resizeObs                = null;
+    _historyIdx               = -1;    // ↑/↓ history navigation cursor; reset on manual input
+    _lastDraftChange          = null;  // { api, prev } — one-step Cmd+Z revert in edit mode
+    _globalKeyHandler         = null;  // bound window keydown ref for removeEventListener
+    // Disambiguation ("Did You Mean?") — medium-confidence path
+    @track _disambiguateAction = null;  // { message, sObject, candidates: [{ key, label, soqlFilter, sObject }] }
     // Schema cache admin
     @track _refreshingCache   = false;
     // OCR direct import
     @track _ocrImporting      = false;
     // Record summary card
     @track _summaryResult     = null;   // { fields: [...], isEditable }
-    @track _summaryEditing    = false;  // true while showing field-selector UI
+    @track _summaryEditing    = false;  // true while showing field-selector/value-edit UI
     @track _summaryAllFields  = [];     // candidate fields for edit mode
     @track _savingSummary     = false;
+    @track _fieldSearchKw     = '';     // incremental search keyword in edit mode
+    @track _draftValues       = {};     // { [apiName]: draftValue } — per-field drafts
     // CSV bulk import
     @track _csvState          = null;  // { phase, fileName, headers, rows, mappings, result, progress }
     @track _csvDownloadHref   = null;  // data: URI for result CSV download
     _csvRowStatuses           = [];    // [{ status:'OK'|'NG', error:string|null }] indexed by data row
+    _csvExternalKeyField      = '';    // optional external ID field for upsert mode
     // Parent-child lookup resolver
     @track _parentState       = null;  // { field, parentSObj, labelJa, labelEn, selectedParent, candidates, isSearching, searchText }
     // Mass editor overlay (legacy — kept for external use)
@@ -308,6 +318,30 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     _sObjectType  = null;
     _pageType     = 'other';
     _undoSnapshot = null;
+
+    // Returns display-field definitions for any sObject.
+    // For objects in the static map, returns the curated list.
+    // For unknown/custom objects, derives column metadata from actual record data.
+    _schemaFor(sObj, records) {
+        const known = SOQL_DEFAULT_FIELDS[sObj];
+        if (known) return [...known];
+        const sample = records?.find(r => r && typeof r === 'object');
+        if (!sample) return [];
+        return Object.keys(sample)
+            .filter(k => k !== 'Id' && k !== '_type')
+            .map(apiName => {
+                const base = apiName.replace(/__c$/i, '').replace(/__r$/i, '');
+                const display = base.replace(/_+/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2');
+                return { apiName, label: display, labelEn: display };
+            });
+    }
+
+    // Returns a human-readable label for any sObject (falls back to humanized API name).
+    _sObjectLabel(sObj) {
+        if (!sObj) return '';
+        if (this.isJa && SOBJECT_LABELS_JA[sObj]) return SOBJECT_LABELS_JA[sObj];
+        return sObj.replace(/__c$/i, '').replace(/__r$/i, '').replace(/_+/g, ' ').trim();
+    }
     _reportSummary = null;       // REPORT_EXPLAIN: plain-language summary from Jev runtime
     _workerKvSeeded = new Set(); // sObject API names already seeded into Worker KV this session
 
@@ -350,9 +384,12 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     get hasPrefill()   { return this._prefillAction !== null; }
     get hasGuide()          { return this._guideAction !== null; }
     get hasInsight()        { return this._insightAction !== null; }
-    get hasKnowledgeAlert() { return this._knowledgeAlert !== null; }
-    get hasAddressCard()    { return this._addressCard !== null; }
-    get knowledgeWarnings() { return this._knowledgeAlert?.knowledgeWarnings ?? []; }
+    get hasKnowledgeAlert()  { return this._knowledgeAlert !== null; }
+    get hasAddressCard()     { return this._addressCard !== null; }
+    get knowledgeWarnings()  { return this._knowledgeAlert?.knowledgeWarnings ?? []; }
+    get hasDisambiguate()    { return this._disambiguateAction !== null; }
+    get disambiguateCandidates() { return this._disambiguateAction?.candidates ?? []; }
+    get disambiguateMessage() { return this._disambiguateAction?.message ?? (this.isJa ? 'もしかしてこちらですか？' : 'Did you mean…?'); }
 
     // ── Context panel (ambient, idle state) ───────────────────────────────────
 
@@ -360,7 +397,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         if (!this._sObjectType) return false;
         const hasActiveCard = this.hasPrefill || this.hasGuide || this.hasResults ||
                               this.hasInsight || this.hasKnowledgeAlert || this.hasAddressCard ||
-                              this.hasPendingApprovals || this.hasCsvImport || this.hasSoqlResults;
+                              this.hasPendingApprovals || this.hasCsvImport || this.hasSoqlResults || this.hasDisambiguate;
         if (hasActiveCard) return false;
         return this._contextFields.length > 0 || this._contextRules.length > 0;
     }
@@ -457,7 +494,12 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
 
     get soqlIsCardMode()        { return this._viewMode === 'card';  }
     get soqlIsTableMode()       { return this._viewMode === 'table'; }
+    get soqlIsEmpty()           { return !this._soqlQuery?.isLoading && !(this._soqlQuery?.records?.length); }
+    get soqlEmptyLabel()        { return this.isJa ? '該当するレコードが見つかりませんでした。' : 'No records found.'; }
     get soqlWideHint()          { return !this._isWideMode && (this._soqlQuery?.selectFields?.length ?? 0) >= 4; }
+    get soqlHasMore()           { return this._soqlQuery?.hasMore ?? false; }
+    get soqlIsLoadingMore()     { return this._soqlQuery?.isLoadingMore ?? false; }
+    get soqlLoadMoreLabel()     { return this.isJa ? 'さらに読み込む' : 'Load more'; }
     get soqlShortcutsLabel()    { return this.isJa ? 'よく使う検索' : 'Saved searches'; }
 
     // ── Record Summary Card getters ───────────────────────────────────────────
@@ -467,7 +509,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         // hasPendingApprovals is a bottom notification, not a replacement for the summary
         const hasActiveCard = this.hasPrefill || this.hasGuide || this.hasResults ||
                               this.hasInsight || this.hasKnowledgeAlert || this.hasAddressCard ||
-                              this.hasCsvImport || this.hasSoqlResults;
+                              this.hasCsvImport || this.hasSoqlResults || this.hasDisambiguate;
         if (hasActiveCard) return false;
         return (this._summaryResult?.fields?.length ?? 0) > 0;
     }
@@ -490,7 +532,57 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         }));
     }
 
-    get summaryEditSaveLabel() { return this.isJa ? '保存' : 'Save'; }
+    get summaryEditSaveLabel() {
+        const n = this.dirtyEditCount;
+        if (n > 0) return this.isJa ? `💾 ${n}件の変更を保存` : `💾 Save ${n} change${n !== 1 ? 's' : ''}`;
+        return this.isJa ? '保存' : 'Save';
+    }
+
+    get veditSearchPlaceholder() {
+        return this.isJa
+            ? '項目名で検索… 例：電話番号を03-1234-5678に変更'
+            : 'Search fields… e.g. phone to 03-1234-5678';
+    }
+
+    get dirtyEditCount() {
+        return this._summaryAllFields.filter(f => {
+            if (!Object.prototype.hasOwnProperty.call(this._draftValues, f.apiName)) return false;
+            const origVal = f.displayValue != null ? String(f.displayValue) : '';
+            return this._draftValues[f.apiName] !== origVal;
+        }).length;
+    }
+
+    get filteredEditFields() {
+        const kw = this._fieldSearchKw.trim().toLowerCase();
+        return this._summaryAllFields.filter(f => {
+            if (!kw) return true;
+            return (f.label ?? '').toLowerCase().includes(kw) ||
+                   (f.apiName ?? '').toLowerCase().includes(kw);
+        }).map(f => {
+            const origVal    = f.displayValue != null ? String(f.displayValue) : '';
+            const hasDraft   = Object.prototype.hasOwnProperty.call(this._draftValues, f.apiName);
+            const draftVal   = hasDraft ? this._draftValues[f.apiName] : origVal;
+            const isDirty    = hasDraft && draftVal !== origVal;
+            const fType      = (f.fieldType ?? '').toUpperCase();
+            const isBool     = fType === 'BOOLEAN';
+            let   inputType  = 'text';
+            if      (fType === 'DATE')                  inputType = 'date';
+            else if (fType === 'DATETIME')              inputType = 'datetime-local';
+            else if (fType === 'PHONE')                 inputType = 'tel';
+            else if (fType === 'EMAIL')                 inputType = 'email';
+            else if (fType === 'URL')                   inputType = 'url';
+            else if (['CURRENCY','DOUBLE','INTEGER','LONG'].includes(fType)) inputType = 'number';
+            return {
+                ...f,
+                draftValue:      draftVal,
+                draftValueBool:  draftVal === 'true',
+                isDirty,
+                inputType,
+                isTextField:     !isBool,
+                isCheckboxField: isBool,
+            };
+        });
+    }
 
     // Skips for:each when editing, avoids lwc:unless issues inside nested templates
     get summaryDisplayRows() {
@@ -505,7 +597,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         if (this.isLoading) return false;
         const hasActiveCard = this.hasPrefill || this.hasGuide || this.hasResults ||
                               this.hasInsight || this.hasKnowledgeAlert || this.hasAddressCard ||
-                              this.hasCsvImport || this.hasSoqlResults;
+                              this.hasCsvImport || this.hasSoqlResults || this.hasDisambiguate;
         if (hasActiveCard) return false;
         return this._recentRecords.length > 0 || this._recentPrompts.length > 0;
     }
@@ -536,7 +628,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         if (!this._recordId || !this._sObjectType) return [];
         const hasActiveCard = this.hasPrefill || this.hasGuide || this.hasResults ||
                               this.hasInsight || this.hasKnowledgeAlert || this.hasAddressCard ||
-                              this.hasPendingApprovals || this.hasCsvImport || this.hasSoqlResults;
+                              this.hasPendingApprovals || this.hasCsvImport || this.hasSoqlResults || this.hasDisambiguate;
         if (hasActiveCard) return [];
         return (CHILD_ACTIONS[this._sObjectType] ?? []).map((c, i) => ({
             ...c,
@@ -928,6 +1020,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     // ── Input handlers ────────────────────────────────────────────────────────
 
     handleInputAutoResize(e) {
+        this._historyIdx    = -1;   // any manual edit resets history cursor
         this.inputText      = e.target.value;
         e.target.style.height = 'auto';
         e.target.style.height = Math.min(e.target.scrollHeight, TEXTAREA_MAX_H) + 'px';
@@ -944,6 +1037,13 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             this.handleSubmit();
         }
         if (e.key === 'Escape') {
+            if (this._summaryEditing) {
+                this._summaryEditing   = false;
+                this._summaryAllFields = [];
+                this._fieldSearchKw    = '';
+                this._draftValues      = {};
+                return;
+            }
             this._resetInput();
             this.dismissStatus();
             this.dismissResults();
@@ -951,6 +1051,55 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             this.dismissInsight();
             this.dismissKnowledgeAlert();
             this.dismissAddressCard();
+        }
+        if ((e.metaKey || e.ctrlKey) && e.key === 'e') {
+            if (this.hasSummaryCard) {
+                e.preventDefault();
+                this.handleEditSummary();
+            }
+        }
+        if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+            if (this._summaryEditing) {
+                e.preventDefault();
+                this.handleSummarySave();
+            }
+        }
+        // ↑ / ↓ — history navigation through recent prompts
+        if (e.key === 'ArrowUp' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+            const prompts = this._recentPrompts;
+            if (prompts.length > 0) {
+                e.preventDefault();
+                this._historyIdx = Math.min(this._historyIdx + 1, prompts.length - 1);
+                const text = prompts[this._historyIdx] ?? '';
+                this.inputText = text;
+                const ta = this.template.querySelector('.furu-bar__textarea');
+                if (ta) { ta.value = text; ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, TEXTAREA_MAX_H) + 'px'; }
+            }
+        }
+        if (e.key === 'ArrowDown' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+            if (this._historyIdx > 0) {
+                e.preventDefault();
+                this._historyIdx--;
+                const text = this._recentPrompts[this._historyIdx] ?? '';
+                this.inputText = text;
+                const ta = this.template.querySelector('.furu-bar__textarea');
+                if (ta) { ta.value = text; ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, TEXTAREA_MAX_H) + 'px'; }
+            } else if (this._historyIdx === 0) {
+                e.preventDefault();
+                this._historyIdx = -1;
+                this.inputText = '';
+                const ta = this.template.querySelector('.furu-bar__textarea');
+                if (ta) { ta.value = ''; ta.style.height = 'auto'; }
+            }
+        }
+        // Cmd/Ctrl+Z — revert last field draft change in edit mode
+        if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+            if (this._summaryEditing && this._lastDraftChange) {
+                e.preventDefault();
+                const { api, prev } = this._lastDraftChange;
+                this._draftValues = { ...this._draftValues, [api]: prev };
+                this._lastDraftChange = null;
+            }
         }
     }
 
@@ -963,6 +1112,19 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     // ── Admin lifecycle ───────────────────────────────────────────────────────
 
     connectedCallback() {
+        // Expose the user-key suffix as a DOM attribute so E2E tests can detect it
+        // and write to the correct LWS-namespaced localStorage keys (furubar_ph_*, etc.).
+        const suffix = (userId ?? 'anon').slice(-8);
+        if (this.template.host) {
+            this.template.host.dataset.furuSuffix = suffix;
+        }
+
+        // Global shortcuts (Cmd+K, Cmd+Shift+P) require a window-level listener because
+        // the keydown target can be any element on the page, not inside the component.
+        this._globalKeyHandler = this._onGlobalKey.bind(this);
+        // eslint-disable-next-line @lwc/lwc/no-global-event-listeners
+        window.addEventListener('keydown', this._globalKeyHandler);
+
         getAdminContext()
             .then(ctx => {
                 this._isAdmin = ctx.isAdmin;
@@ -978,6 +1140,11 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         // Seed Worker KV with org's custom object catalog for Jev dynamic sObject criteria.
         // Fire-and-forget: non-blocking, doesn't affect first render.
         this._seedCustomSObjectsToWorkerKv();
+        // Restore ephemeral UI state from previous session (pop-out, modal close, etc.)
+        this._restoreSessionState();
+        // Override with pop-out transfer if this window was just opened via Cmd+Shift+P.
+        // Must run after _restoreSessionState so the transfer wins over sessionStorage.
+        this._consumePopOutTransfer();
     }
 
     _seedCustomSObjectsToWorkerKv() {
@@ -1032,8 +1199,200 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     }
 
     disconnectedCallback() {
+        if (this._globalKeyHandler) {
+            window.removeEventListener('keydown', this._globalKeyHandler);
+            this._globalKeyHandler = null;
+        }
         this._resizeObs?.disconnect();
         this._resizeObs = null;
+        this._saveSessionState();
+    }
+
+    // ── Global keyboard shortcuts ─────────────────────────────────────────────
+
+    _onGlobalKey(e) {
+        // Cmd+K / Ctrl+K — toggle palette (open + focus, or close)
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'k') {
+            e.preventDefault();
+            this._togglePalette();
+        }
+        // Cmd+Shift+P / Ctrl+Shift+P — pop out into separate window
+        if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'p') {
+            e.preventDefault();
+            this._popOutWindow();
+        }
+    }
+
+    _togglePalette() {
+        const host = this.template.host;
+        // offsetParent is null when the utility bar panel is collapsed/hidden
+        const panelVisible = host && host.offsetParent !== null;
+        if (panelVisible) {
+            // Panel is open — focus the textarea (or close if already focused)
+            const ta = this.template.querySelector('.furu-bar__textarea');
+            if (ta && document.activeElement === ta) {
+                this._clickUtilityBarToggle();
+            } else if (ta) {
+                ta.focus();
+            }
+        } else {
+            // Panel is closed — open it, then focus textarea after render
+            this._clickUtilityBarToggle();
+            // eslint-disable-next-line @lwc/lwc/no-async-operation
+            setTimeout(() => {
+                const ta = this.template.querySelector('.furu-bar__textarea');
+                if (ta) ta.focus();
+            }, 300);
+        }
+    }
+
+    _clickUtilityBarToggle() {
+        // Salesforce renders the utility bar toggle as a button in the utility bar footer.
+        // The aria-label contains the component's label ("furuAgent Bar" or similar).
+        const btn = document.querySelector('button[aria-label*="furu"], button[aria-label*="Furu"]');
+        if (btn) { btn.click(); return; }
+        // Fallback: click the utility bar item that contains this component's host
+        const host = this.template.host;
+        const utilityItem = host?.closest('[data-aura-class*="utilityBar"], .slds-utility-bar__action');
+        if (utilityItem) utilityItem.click();
+    }
+
+    _popOutWindow() {
+        // Write current SOQL results + state to localStorage before opening.
+        // The new window reads and clears this transfer key in _consumePopOutTransfer().
+        this._savePopOutTransfer();
+        const url = window.location.href;
+        window.open(url, 'furubar_popout', 'width=520,height=740,resizable=yes,scrollbars=yes');
+    }
+
+    // ── Session state persistence (Layer 1: sessionStorage) ──────────────────
+    // Survives modal close / pop-out / component unmount within the same browser tab.
+    // TTL: 30 minutes. Draft values trigger a recovery toast on restore.
+
+    _stateStorageKey() {
+        return `furubar_state_${(userId ?? 'anon').slice(-8)}`;
+    }
+
+    _saveSessionState() {
+        try {
+            const sq = this._soqlQuery;
+            const state = {
+                inputText:     this.inputText ?? '',
+                soqlQuery:     sq ? {
+                    sObject:      sq.sObject,
+                    conditions:   sq.conditions,
+                    orderBy:      sq.orderBy,
+                    limit:        sq.limit,
+                    selectFields: sq.selectFields ?? [],
+                    records:      (sq.records ?? []).slice(0, 20),
+                    summary:      sq.summary ?? '',
+                    hasMore:      sq.hasMore ?? false,
+                } : null,
+                draftValues:   this._draftValues   ?? {},
+                fieldSearchKw: this._fieldSearchKw ?? '',
+                viewMode:      this._viewMode      ?? 'card',
+                ts:            Date.now(),
+            };
+            sessionStorage.setItem(this._stateStorageKey(), JSON.stringify(state));
+        } catch (_) {}
+    }
+
+    _restoreSessionState() {
+        try {
+            const raw = sessionStorage.getItem(this._stateStorageKey());
+            if (!raw) return;
+            const state = JSON.parse(raw);
+            const age = Date.now() - (state.ts ?? 0);
+            if (age > 30 * 60 * 1000) return; // stale — discard
+
+            if (state.inputText)     this.inputText     = state.inputText;
+            if (state.fieldSearchKw) this._fieldSearchKw = state.fieldSearchKw;
+            if (state.viewMode)      this._viewMode      = state.viewMode;
+
+            if (state.soqlQuery?.sObject) {
+                this._soqlQuery = {
+                    ...state.soqlQuery,
+                    isLoading:     false,
+                    isLoadingMore: false,
+                };
+            } else if (state.soqlSObject && state.soqlFilter) {
+                // Legacy format (v1.0.x) — rebuild without records
+                this._soqlQuery = {
+                    sObject:       state.soqlSObject,
+                    conditions:    state.soqlFilter,
+                    orderBy:       state.soqlOrderBy,
+                    limit:         state.soqlLimit ?? 20,
+                    selectFields:  this._schemaFor(state.soqlSObject, []),
+                    records:       [],
+                    summary:       this.isJa ? '前回の検索を復元しました' : 'Restored previous search',
+                    isLoading:     false,
+                    hasMore:       false,
+                    isLoadingMore: false,
+                };
+            }
+
+            // Restore draft values and show recovery toast so user knows data survived
+            const drafts = state.draftValues ?? {};
+            if (Object.keys(drafts).length > 0) {
+                this._draftValues = drafts;
+                const n = Object.keys(drafts).length;
+                this.dispatchEvent(new ShowToastEvent({
+                    title: this.isJa ? '未保存の編集データを復元しました' : 'Unsaved edits restored',
+                    message: this.isJa
+                        ? `${n}件の編集中データが残っています。保存またはキャンセルしてください。`
+                        : `${n} draft field(s) recovered. Save or discard them.`,
+                    variant: 'warning',
+                    mode: 'sticky',
+                }));
+            }
+        } catch (_) {}
+    }
+
+    // ── Pop-out window state transfer (localStorage, cross-tab) ──────────────
+    // sessionStorage is per-tab and does NOT transfer across window.open().
+    // We write the full SOQL query to localStorage just before opening the pop-out,
+    // and the new window reads + clears it within 15 s of connectedCallback.
+
+    _popOutTransferKey() {
+        return `furubar_pot_${(userId ?? 'anon').slice(-8)}`;
+    }
+
+    _savePopOutTransfer() {
+        try {
+            const sq = this._soqlQuery;
+            const payload = {
+                soqlQuery: sq ? {
+                    sObject:      sq.sObject,
+                    conditions:   sq.conditions,
+                    orderBy:      sq.orderBy,
+                    limit:        sq.limit,
+                    selectFields: sq.selectFields ?? [],
+                    records:      (sq.records ?? []).slice(0, 20),
+                    summary:      sq.summary ?? '',
+                    hasMore:      sq.hasMore ?? false,
+                } : null,
+                viewMode:  this._viewMode,
+                inputText: this.inputText ?? '',
+                ts:        Date.now(),
+            };
+            localStorage.setItem(this._popOutTransferKey(), JSON.stringify(payload));
+        } catch (_) {}
+    }
+
+    _consumePopOutTransfer() {
+        try {
+            const key = this._popOutTransferKey();
+            const raw = localStorage.getItem(key);
+            if (!raw) return;
+            const payload = JSON.parse(raw);
+            if (Date.now() - (payload.ts ?? 0) > 90_000) { localStorage.removeItem(key); return; }
+            localStorage.removeItem(key); // read-once
+            if (payload.soqlQuery?.sObject) {
+                this._soqlQuery = { ...payload.soqlQuery, isLoading: false, isLoadingMore: false };
+            }
+            if (payload.viewMode)  this._viewMode  = payload.viewMode;
+            if (payload.inputText) this.inputText   = payload.inputText;
+        } catch (_) {}
     }
 
     // ── Personal query shortcut storage (localStorage) ────────────────────────
@@ -1161,16 +1520,19 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     }
 
     async _runSoqlFromSaved(saved) {
+        const pageSize = saved.limit ?? 20;
         this._clearTableEditState();
         this._soqlQuery = {
-            sObject:      saved.sObject,
-            conditions:   saved.conditions,
-            orderBy:      saved.orderBy,
-            limit:        saved.limit,
-            selectFields: saved.selectFields,
-            records:      [],
-            summary:      saved.name,
-            isLoading:    true,
+            sObject:       saved.sObject,
+            conditions:    saved.conditions,
+            orderBy:       saved.orderBy,
+            limit:         pageSize,
+            selectFields:  saved.selectFields,
+            records:       [],
+            summary:       saved.name,
+            isLoading:     true,
+            hasMore:       false,
+            isLoadingMore: false,
         };
         try {
             const records = await executeSoqlQuery({
@@ -1178,7 +1540,8 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
                 conditionsJson:     JSON.stringify(saved.conditions),
                 selectApiNamesJson: JSON.stringify(saved.selectFields.map(f => f.apiName)),
                 orderBy:            saved.orderBy,
-                maxRows:            saved.limit,
+                maxRows:            pageSize,
+                offsetRows:         0,
             });
             // Increment use count
             const list = this._loadSavedQueries().map(q =>
@@ -1187,7 +1550,12 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             this._persistSavedQueries(list);
             this._savedQueries = list;
 
-            this._soqlQuery = { ...this._soqlQuery, records, isLoading: false };
+            this._soqlQuery = {
+                ...this._soqlQuery,
+                records,
+                isLoading: false,
+                hasMore:   records.length === pageSize,
+            };
             this._setStatus(
                 this.isJa ? `${records.length}件が見つかりました` : `${records.length} record(s) found`,
                 'info'
@@ -1228,9 +1596,11 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     }
 
     _loadSummary(sobj, recordId) {
-        this._summaryResult  = null;
-        this._summaryEditing = false;
+        this._summaryResult    = null;
+        this._summaryEditing   = false;
         this._summaryAllFields = [];
+        this._fieldSearchKw    = '';
+        this._draftValues      = {};
         if (!sobj || !recordId) return;
         getRecordSummary({ sObjectApiName: sobj, recordId })
             .then(result => {
@@ -1243,12 +1613,14 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     async handleEditSummary() {
         if (!this._summaryEditing) {
             this._summaryEditing = true;
+            this._fieldSearchKw  = '';
+            this._draftValues    = {};
             if (this._summaryAllFields.length === 0) {
                 try {
                     const raw = await getCandidateFields({ sObjectApiName: this._sObjectType });
                     const valueMap = {};
                     (this._summaryResult?.fields ?? []).forEach(f => {
-                        if (f.apiName && f.value != null) valueMap[f.apiName] = f.value;
+                        if (f.apiName && f.value != null) valueMap[f.apiName] = String(f.value);
                     });
                     this._summaryAllFields = JSON.parse(JSON.stringify(raw)).map(f => ({
                         ...f,
@@ -1256,11 +1628,19 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
                     }));
                 } catch(e) {
                     this._summaryEditing = false;
+                    return;
                 }
             }
+            // eslint-disable-next-line @lwc/lwc/no-async-operation
+            setTimeout(() => {
+                const inp = this.template.querySelector('.furu-bar__vedit-search');
+                if (inp) inp.focus();
+            }, 80);
         } else {
             this._summaryEditing   = false;
             this._summaryAllFields = [];
+            this._fieldSearchKw    = '';
+            this._draftValues      = {};
         }
     }
 
@@ -1271,6 +1651,34 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         );
     }
 
+    handleFieldSearchInput(e) {
+        const raw = e.target.value;
+        // NL parse: "X をY に変更" → narrow filter to X and inject Y as draft
+        const m = raw.match(/^(.+?)を(.+?)(?:に変更|にして|に更新|に設定|に直して)?$/);
+        if (m) {
+            const fieldKw  = m[1].trim();
+            const injected = m[2].trim();
+            const matched  = this._summaryAllFields.find(f =>
+                (f.label ?? '').includes(fieldKw) ||
+                (f.apiName ?? '').toLowerCase().includes(fieldKw.toLowerCase())
+            );
+            if (matched && injected) {
+                this._draftValues   = { ...this._draftValues, [matched.apiName]: injected };
+                this._fieldSearchKw = fieldKw;
+                return;
+            }
+        }
+        this._fieldSearchKw = raw;
+    }
+
+    handleFieldDraftChange(e) {
+        const api  = e.currentTarget.dataset.apiname;
+        const val  = e.target.type === 'checkbox' ? String(e.target.checked) : e.target.value;
+        const prev = this._draftValues[api] ?? '';
+        this._lastDraftChange = { api, prev };
+        this._draftValues = { ...this._draftValues, [api]: val };
+    }
+
     async handleSummarySave() {
         const selected = this._summaryAllFields.filter(f => f.isChecked);
         if (selected.length === 0) {
@@ -1279,12 +1687,35 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         }
         this._savingSummary = true;
         try {
+            // 1. Save field selection
             await updateSummaryFields({
                 sObjectApiName: this._sObjectType,
                 fieldsJson:     JSON.stringify(selected),
             });
+            // 2. Save any dirty field values
+            const dirtyFields = {};
+            this._summaryAllFields.forEach(f => {
+                if (!Object.prototype.hasOwnProperty.call(this._draftValues, f.apiName)) return;
+                const origVal = f.displayValue != null ? String(f.displayValue) : '';
+                if (this._draftValues[f.apiName] !== origVal) {
+                    dirtyFields[f.apiName] = this._draftValues[f.apiName];
+                }
+            });
+            if (Object.keys(dirtyFields).length > 0) {
+                await this._doUpdate({
+                    intent:         'UPDATE_RECORD',
+                    updateSObject:  this._sObjectType,
+                    updateRecordId: this._recordId,
+                    fields:         dirtyFields,
+                    message:        this.isJa
+                        ? `${Object.keys(dirtyFields).length}件の項目を更新しました。`
+                        : `${Object.keys(dirtyFields).length} field(s) updated.`,
+                });
+            }
             this._summaryEditing   = false;
             this._summaryAllFields = [];
+            this._fieldSearchKw    = '';
+            this._draftValues      = {};
             this._loadSummary(this._sObjectType, this._recordId);
         } catch(e) {
             this._setStatus(e.body?.message ?? 'Save failed', 'error');
@@ -1687,8 +2118,17 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             switch (action.intent) {
                 case 'NAVIGATE':        await this._doNavigate(action);  break;
                 case 'UPDATE_RECORD':
-                    if (action.knowledgeWarnings?.length > 0) {
-                        this._knowledgeAlert = action;   // pause — show learned rule alert
+                    if (action.needsConfirmation || action.knowledgeWarnings?.length > 0) {
+                        // needsConfirmation = confidence < 95%; or learned-rule alert
+                        // Inject a confidence warning at the top of the warnings list
+                        if (action.needsConfirmation && !(action.knowledgeWarnings?.length > 0)) {
+                            const pct = Math.round((action.confidence ?? 0) * 100);
+                            const warn = this.isJa
+                                ? `AIの確信度が ${pct}% のため、実行前に変更内容をご確認ください。`
+                                : `AI confidence is ${pct}% — please review the changes before applying.`;
+                            action = { ...action, knowledgeWarnings: [warn] };
+                        }
+                        this._knowledgeAlert = action;
                     } else {
                         await this._doUpdate(action);
                     }
@@ -1698,7 +2138,8 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
                 case 'EXTRACT_AND_PREFILL': this._doPrefill(action); break;
                 case 'SEARCH':         this._doSearch(action);          break;
                 case 'GUIDE_CREATE':   this._doGuide(action);           break;
-                case 'SOQL_SEARCH':    this._doSoqlSearch(action);      break;
+                case 'SOQL_SEARCH':    this._doSoqlSearch(action);        break;
+                case 'DISAMBIGUATE':   this._doDisambiguate(action);      break;
                 case 'ADD_FIELDS':     this._doAddFields(action);       break;
                 case 'EXPLAIN_FIELD':  this._doInsight(action);         break;
                 case 'EXPLAIN_FORMULA':this._doInsight(action);         break;
@@ -1858,15 +2299,18 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             conditions = Array.isArray(raw) ? raw : [];
         } catch (_) {}
 
+        const pageSize = limit;
         this._soqlQuery = {
-            sObject:      sObj,
+            sObject:       sObj,
             conditions,
             orderBy,
-            limit,
-            selectFields: [...(SOQL_DEFAULT_FIELDS[sObj] ?? SOQL_DEFAULT_FIELDS['Opportunity'] ?? [])],
+            limit:         pageSize,
+            selectFields:  this._schemaFor(sObj, records),
             records,
-            summary:      action.message ?? '',
-            isLoading:    false,
+            summary:       action.message ?? '',
+            isLoading:     false,
+            hasMore:       records.length === pageSize,
+            isLoadingMore: false,
         };
         // Auto-switch to table when popped out with 4+ fields
         if (this._isWideMode && (this._soqlQuery.selectFields?.length ?? 0) >= 4) {
@@ -1878,6 +2322,128 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             this.isJa ? `${records.length}件が見つかりました` : `${records.length} record(s) found`,
             'info'
         );
+    }
+
+    // ── Disambiguation ("Did You Mean?") ─────────────────────────────────────
+
+    _doDisambiguate(action) {
+        const sObj = action.updateSObject ?? this._sObjectType ?? '';
+        this._disambiguateAction = {
+            message:    action.message,
+            sObject:    sObj,
+            candidates: (action.candidates ?? []).map((c, i) => ({
+                key:        String(i),
+                label:      c.label ?? `Option ${i + 1}`,
+                soqlFilter: c.soqlFilter ?? null,  // { conditions, order_by, limit }
+                sObject:    c.sObject   ?? sObj,
+            })),
+        };
+        this._setStatus(action.message ?? (this.isJa ? 'もしかしてこちらですか？' : 'Did you mean…?'), 'info');
+    }
+
+    async handleDisambiguateSelect(e) {
+        const idx       = parseInt(e.currentTarget.dataset.idx, 10);
+        const snap      = this._disambiguateAction;
+        const candidate = snap?.candidates?.[idx];
+        if (!candidate) return;
+
+        this._disambiguateAction = null;
+
+        const filter  = candidate.soqlFilter;
+        const sObj    = candidate.sObject ?? snap.sObject ?? 'Opportunity';
+
+        if (filter) {
+            // Directly execute the pre-built SOQL filter — no additional AI call
+            const knownFields = SOQL_DEFAULT_FIELDS[sObj] ?? [];
+            const pageSize  = filter.limit ?? 20;
+            this._soqlQuery = {
+                sObject:       sObj,
+                conditions:    filter.conditions ?? [],
+                orderBy:       filter.order_by   ?? null,
+                limit:         pageSize,
+                selectFields:  [...knownFields],
+                records:       [],
+                summary:       candidate.label,
+                isLoading:     true,
+                hasMore:       false,
+                isLoadingMore: false,
+            };
+            try {
+                const records = await executeSoqlQuery({
+                    sObjectType:        sObj,
+                    conditionsJson:     JSON.stringify(filter.conditions ?? []),
+                    selectApiNamesJson: knownFields.length ? JSON.stringify(knownFields.map(f => f.apiName)) : null,
+                    orderBy:            filter.order_by ?? null,
+                    maxRows:            pageSize,
+                    offsetRows:         0,
+                });
+                const resolvedFields = this._soqlQuery.selectFields?.length
+                    ? this._soqlQuery.selectFields
+                    : this._schemaFor(sObj, records);
+                this._soqlQuery = {
+                    ...this._soqlQuery,
+                    records,
+                    selectFields: resolvedFields,
+                    isLoading: false,
+                    hasMore:   records.length === pageSize,
+                };
+                this._setStatus(
+                    this.isJa ? `${records.length}件が見つかりました` : `${records.length} record(s) found`,
+                    'info'
+                );
+            } catch (err) {
+                this._soqlQuery = { ...this._soqlQuery, isLoading: false };
+                this._setStatus('Error: ' + (err.body?.message ?? err.message ?? 'Unknown'), 'error');
+            }
+        } else {
+            // No pre-built filter — re-submit with the candidate's label as the new input
+            const ta = this.template.querySelector('.furu-bar__textarea');
+            if (ta) {
+                ta.value = candidate.label;
+                ta.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true }));
+            }
+            this.inputText = candidate.label;
+            setTimeout(() => this.handleSubmit(), 0);
+        }
+    }
+
+    dismissDisambiguate() { this._disambiguateAction = null; }
+
+    // ── SOQL Load More ────────────────────────────────────────────────────────
+
+    async handleLoadMore() {
+        if (!this._soqlQuery || this._soqlQuery.isLoadingMore || !this._soqlQuery.hasMore) return;
+        const offset   = this._soqlQuery.records?.length ?? 0;
+        const pageSize = this._soqlQuery.limit ?? 20;
+        this._soqlQuery = { ...this._soqlQuery, isLoadingMore: true };
+        try {
+            const more = await executeSoqlQuery({
+                sObjectType:        this._soqlQuery.sObject,
+                conditionsJson:     JSON.stringify(this._soqlQuery.conditions ?? []),
+                selectApiNamesJson: JSON.stringify((this._soqlQuery.selectFields ?? []).map(f => f.apiName)),
+                orderBy:            this._soqlQuery.orderBy ?? null,
+                maxRows:            pageSize,
+                offsetRows:         offset,
+            });
+            const combined = [...(this._soqlQuery.records ?? []), ...more];
+            this._soqlQuery = {
+                ...this._soqlQuery,
+                records:       combined,
+                isLoadingMore: false,
+                hasMore:       more.length === pageSize,
+            };
+            this._setStatus(
+                this.isJa ? `${combined.length}件を表示中` : `Showing ${combined.length} record(s)`,
+                'info'
+            );
+        } catch (err) {
+            this._soqlQuery = { ...this._soqlQuery, isLoadingMore: false };
+            this._setStatus(
+                (this.isJa ? '追加読み込みに失敗しました: ' : 'Load more failed: ') +
+                    (err.body?.message ?? err.message ?? 'Unknown'),
+                'error'
+            );
+        }
     }
 
     // ── REPORT_EXPLAIN ────────────────────────────────────────────────────────
@@ -1910,15 +2476,21 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         getSchemaForWorkerKv({ sObjectType })
             .then(fields => {
                 if (!fields?.length) return;
-                // Fire-and-forget POST to Worker /v1/schema-seed via existing Named Credential
-                // The Worker caches these field names in KV (TTL 1 h) for SOQL field validation.
-                // We use a non-awaited fetch here so it never blocks the main UI flow.
+                // Send rich field schema (includes lookup referenceTo) so the Worker can
+                // generate parent-scoped conditions (AccountId = recordId) directly.
                 const orgId = this._orgId;
                 if (orgId) {
                     fetch('/services/apexrest/FuruAgent/schema-seed', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ sObjectType, fieldApiNames: fields }),
+                        body: JSON.stringify({
+                            sObjectType,
+                            fields,
+                            // Also pass current parent context so Worker KV can store
+                            // "which lookup connects this object to its parent"
+                            parentSObjectType: this._sObjectType !== sObjectType ? this._sObjectType : null,
+                            parentRecordId:    this._recordId ?? null,
+                        }),
                     }).catch(() => {});
                 }
             })
@@ -1934,7 +2506,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         if (!newApiNames.length) return;
 
         const sObj   = this._soqlQuery.sObject;
-        const schema = SOQL_DEFAULT_FIELDS[sObj] ?? SOQL_DEFAULT_FIELDS['Opportunity'] ?? [];
+        const schema = this._schemaFor(sObj, this._soqlQuery.records);
         const schemaMap = new Map(schema.map(f => [f.apiName, f]));
 
         // Merge new fields — skip ones already selected
@@ -1953,14 +2525,20 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
 
         try {
             const records = await executeSoqlQuery({
-                sObjectType:       sObj,
-                conditionsJson:    JSON.stringify(this._soqlQuery.conditions),
+                sObjectType:        sObj,
+                conditionsJson:     JSON.stringify(this._soqlQuery.conditions),
                 selectApiNamesJson: JSON.stringify(mergedFields.map(f => f.apiName)),
-                orderBy:           this._soqlQuery.orderBy,
-                maxRows:           this._soqlQuery.limit,
+                orderBy:            this._soqlQuery.orderBy,
+                maxRows:            this._soqlQuery.limit,
+                offsetRows:         0,
             });
-            this._soqlQuery = { ...this._soqlQuery, records, isLoading: false,
-                summary: action.message ?? this._soqlQuery.summary };
+            this._soqlQuery = {
+                ...this._soqlQuery,
+                records,
+                isLoading: false,
+                hasMore:   records.length === this._soqlQuery.limit,
+                summary:   action.message ?? this._soqlQuery.summary,
+            };
             this._setStatus(
                 this.isJa ? `${toAdd.length}件の項目を追加しました` : `Added ${toAdd.length} field(s)`,
                 'success'
@@ -1979,13 +2557,19 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         this._soqlQuery = { ...this._soqlQuery, selectFields: remaining, isLoading: true };
         try {
             const records = await executeSoqlQuery({
-                sObjectType:       this._soqlQuery.sObject,
-                conditionsJson:    JSON.stringify(this._soqlQuery.conditions),
+                sObjectType:        this._soqlQuery.sObject,
+                conditionsJson:     JSON.stringify(this._soqlQuery.conditions),
                 selectApiNamesJson: JSON.stringify(remaining.map(f => f.apiName)),
-                orderBy:           this._soqlQuery.orderBy,
-                maxRows:           this._soqlQuery.limit,
+                orderBy:            this._soqlQuery.orderBy,
+                maxRows:            this._soqlQuery.limit,
+                offsetRows:         0,
             });
-            this._soqlQuery = { ...this._soqlQuery, records, isLoading: false };
+            this._soqlQuery = {
+                ...this._soqlQuery,
+                records,
+                isLoading: false,
+                hasMore:   records.length === this._soqlQuery.limit,
+            };
         } catch (err) {
             this._soqlQuery = { ...this._soqlQuery, isLoading: false };
             this._setStatus(err.body?.message ?? err.message ?? 'Query failed', 'error');
@@ -2502,9 +3086,14 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
 
     // Handlers
     dismissCsvImport() {
-        this._csvState        = null;
-        this._csvDownloadHref = null;
-        this._csvRowStatuses  = [];
+        this._csvState           = null;
+        this._csvDownloadHref    = null;
+        this._csvRowStatuses     = [];
+        this._csvExternalKeyField = '';
+    }
+
+    handleCsvExtKeyChange() {
+        this._csvExternalKeyField = (this.template.querySelector('.furu-bar__csv-ext-key-input')?.value ?? '').trim();
     }
 
     async _startCsvImport(file) {
@@ -2565,7 +3154,12 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         };
         return headers.map(h => {
             const key   = h.trim().toLowerCase().replace(/[　\s]+/g, '');
-            const sfApi = ctxMap[h.trim()] ?? DICT[key] ?? DICT[h.trim()] ?? null;
+            // Pass through any header that already looks like a Salesforce API name
+            // (starts with a letter, contains only word chars — covers LastName, AccountId,
+            // CSV_External_Key__c, Account.AccountNumber dotted notation, etc.)
+            const looksLikeSfApi = /^[A-Za-z][A-Za-z0-9_.]*$/.test(h.trim());
+            const sfApi = ctxMap[h.trim()] ?? DICT[key] ?? DICT[h.trim()]
+                ?? (looksLikeSfApi ? h.trim() : null);
             return {
                 csvHeader:  h,
                 sfApiName:  sfApi,
@@ -2600,7 +3194,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
                 const res = await bulkImportCsv({
                     sObjectType:     sObj,
                     recordsJson:     JSON.stringify(chunk),
-                    externalIdField: null,
+                    externalIdField: this._csvExternalKeyField || null,
                 });
                 inserted += res.totalInserted ?? 0;
                 failed   += res.totalFailed   ?? 0;

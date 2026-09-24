@@ -3,11 +3,12 @@
     {
       "path": "force-app",
       "default": true,
-      "package": "FuruAgentBar",
-      "versionName": "v1.0 — AI-Powered SOQL Search, Inline Edit, Data Cloud & CSV",
-      "versionNumber": "1.0.0.1",
+      "package": "FlashBar AI",
+      "packageType": "Unlocked",
+      "versionName": "v1.0.0 — AI Command Palette for Salesforce",
+      "versionNumber": "1.0.0.NEXT",
       "releaseNotesUrl": "https://github.com/furuCRM-Inc/furu-agent-bar/releases/tag/v1.0.0",
-      "postInstallUrl": "https://furucrm.com/furu-agent-bar/setup"
+      "postInstallUrl": "https://flashbar.furucrm.com/setup"
     }
   ],
   "name": "furu-agent-bar",
