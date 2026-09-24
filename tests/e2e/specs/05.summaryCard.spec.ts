@@ -54,7 +54,7 @@ test.describe('Record Summary Card', () => {
     expect(hasRequired).toBe(true);
   });
 
-  test('edit mode toggle shows candidate field list', async ({ page }) => {
+  test('edit mode toggle shows search bar and candidate field list', async ({ page }) => {
     await page.waitForFunction(() => {
       const bar = document.querySelector('c-furu-agent-bar');
       const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
@@ -64,28 +64,28 @@ test.describe('Record Summary Card', () => {
     await page.evaluate(() => {
       const bar = document.querySelector('c-furu-agent-bar');
       const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
-      // Edit button is ✏️ emoji with class furu-bar__summary-edit-btn
       const editBtn = root.querySelector('.furu-bar__summary-edit-btn') as HTMLButtonElement | null;
-      (editBtn)?.click();
+      editBtn?.click();
     });
 
+    // Wait for field rows — they appear only after getCandidateFields Apex returns (~25-30s cold)
     await page.waitForFunction(() => {
       const bar = document.querySelector('c-furu-agent-bar');
       const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
-      return !!root.querySelector('.furu-bar__summary-check-row');
-    }, { timeout: 30_000 });
+      return root.querySelectorAll('.furu-bar__vedit-row').length > 0;
+    }, { timeout: 60_000 });
 
-    const checkRows = await page.evaluate(() => {
+    const editRows = await page.evaluate(() => {
       const bar = document.querySelector('c-furu-agent-bar');
       const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
-      return root.querySelectorAll('.furu-bar__summary-check-row').length;
+      return root.querySelectorAll('.furu-bar__vedit-row').length;
     });
-    expect(checkRows).toBeGreaterThan(0);
+    expect(editRows).toBeGreaterThan(0);
   });
 
   // ── Edit mode — data type rendering ────────────────────────────────────────
 
-  /** Helper: open field-selector edit mode in the summary card. */
+  /** Helper: open value-edit mode in the summary card. */
   async function openEditMode(page: Parameters<typeof test>[1]) {
     await page.waitForFunction(() => {
       const bar = document.querySelector('c-furu-agent-bar');
@@ -95,15 +95,15 @@ test.describe('Record Summary Card', () => {
     await page.evaluate(() => {
       const bar = document.querySelector('c-furu-agent-bar');
       const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
-      // Edit button is ✏️ with class furu-bar__summary-edit-btn
       const editBtn = root.querySelector('.furu-bar__summary-edit-btn') as HTMLButtonElement | null;
-      (editBtn)?.click();
+      editBtn?.click();
     });
+    // Wait for field rows — they appear only after getCandidateFields Apex returns (~25-30s cold)
     await page.waitForFunction(() => {
       const bar = document.querySelector('c-furu-agent-bar');
       const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
-      return !!root.querySelector('.furu-bar__summary-check-row');
-    }, { timeout: 30_000 });
+      return root.querySelectorAll('.furu-bar__vedit-row').length > 0;
+    }, { timeout: 60_000 });
   }
 
   // ── Edit mode — field-selector data type coverage ─────────────────────────
@@ -117,7 +117,7 @@ test.describe('Record Summary Card', () => {
     const checkboxCount = await page.evaluate(() => {
       const bar  = document.querySelector('c-furu-agent-bar');
       const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
-      return root.querySelectorAll('.furu-bar__summary-check-row input[type="checkbox"]').length;
+      return root.querySelectorAll('.furu-bar__vedit-checkbox').length;
     });
     // At minimum, the currently displayed fields should appear as checkboxes
     expect(checkboxCount).toBeGreaterThan(0);
@@ -168,7 +168,7 @@ test.describe('Record Summary Card', () => {
       const bar  = document.querySelector('c-furu-agent-bar');
       const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
       const cb   = root.querySelector(
-        '.furu-bar__summary-check-row input[type="checkbox"]'
+        '.furu-bar__vedit-checkbox'
       ) as HTMLInputElement | null;
       if (!cb) return false;
       const before = cb.checked;

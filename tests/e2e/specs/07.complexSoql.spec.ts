@@ -26,19 +26,19 @@ test.describe('Complex SOQL & Semantic Search', () => {
     // Load via pre-seeded shortcut to bypass processIntent (AI backend).
     await bar.loadAccountsViaShortcut();
     const status = await bar.statusText();
-    expect(status).toMatch(/\d+件/);
+    expect(status).toMatch(/\d+(?:件| record)/);
   });
 
   test('date-range query: CloseDate within next 30 days', async ({ page }) => {
     await bar.loadAccountsViaShortcut();
     const status = await bar.statusText();
-    expect(status).toMatch(/\d+件/);
+    expect(status).toMatch(/\d+(?:件| record)/);
   });
 
   test('cross-object query: search by account industry', async ({ page }) => {
     await bar.loadAccountsViaShortcut();
     const status = await bar.statusText();
-    expect(status).toMatch(/\d+件/);
+    expect(status).toMatch(/\d+(?:件| record)/);
   });
 
   test('ADD FIELD command appends a column to the table', async ({ page }) => {
@@ -295,5 +295,41 @@ test.describe('AI Pipeline — Complex Natural Language Query Patterns', () => {
       return !!root.querySelector('.furu-bar__prefill');
     });
     expect(prefillVisible).toBe(false);
+  });
+
+  // ── Unconditioned ORDER BY query (no WHERE) ───────────────────────────────
+  // Regression: when soql_filter is null (no conditions), the Apex filterRaw
+  // instanceof Map guard was skipped silently → soqlRecords never set → empty card.
+
+  test('top revenue opportunities: unconditioned ORDER BY Amount DESC', async ({ page }) => {
+    // "商談を売上金額の高い順に見せて" has no WHERE conditions — only ORDER BY Amount DESC.
+    // The Apex fallback else branch must run executeSoqlQuery with empty conditions
+    // and the SOQL card must appear (even with 0 records in an empty org).
+    const statusText = await submitAndWait(page, bar, '商談を売上金額の高い順に見せて');
+    expect(statusText).not.toMatch(/HTTP 402|HTTP 500/);
+
+    // SOQL card header must be visible — hasSoqlResults = true
+    const soqlHeaderVisible = await page.evaluate(() => {
+      const b    = document.querySelector('c-furu-agent-bar');
+      const root = (b as HTMLElement)?.shadowRoot ?? b!;
+      return !!root.querySelector('.furu-bar__soql-header');
+    });
+    expect(soqlHeaderVisible).toBe(true);
+
+    // Status must contain a numeric count (e.g. "0 record(s) found", "5件が見つかりました")
+    expect(statusText).toMatch(/\d+/);
+
+    // If results came back, they should be Opportunity cards or empty-state message
+    const bodyContent = await page.evaluate(() => {
+      const b    = document.querySelector('c-furu-agent-bar');
+      const root = (b as HTMLElement)?.shadowRoot ?? b!;
+      const cards  = root.querySelectorAll('.furu-bar__soql-card').length;
+      const empty  = root.querySelector('.furu-bar__soql-empty');
+      return { cards, hasEmptyState: !!empty };
+    });
+    // Must show either records OR the empty-state message — never a blank card body
+    expect(bodyContent.cards > 0 || bodyContent.hasEmptyState).toBe(true);
+
+    test.info().annotations.push({ type: 'soql-result', description: statusText });
   });
 });

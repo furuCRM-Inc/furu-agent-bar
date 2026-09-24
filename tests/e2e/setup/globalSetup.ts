@@ -1,14 +1,21 @@
+/**
+ * globalSetup — Playwright session builder for FlashBar AI E2E tests.
+ *
+ * Auth strategy:
+ *   Admin  → frontdoor.jsp (SF_ADMIN_ACCESS_TOKEN)
+ *   EN/JA  → admin frontdoor.jsp → servlet.su "Login As" switch
+ *            (org has enableAdminLoginAsAnyUser=true, so no device-verification prompt)
+ */
 import { chromium, FullConfig } from '@playwright/test';
 import * as path from 'path';
 import * as fs from 'fs';
 
-const AUTH_FILE    = path.join(__dirname, '../.auth/sfState.json');
-// Separate timestamp file — not sfState.json mtime, which is also written during injection.
-const AUTH_TS_FILE = path.join(__dirname, '../.auth/lastAuth.ts.txt');
-const E2E_QUERY_NAME = '__e2e_test_accounts__';
+const AUTH_EN    = path.join(__dirname, '../.auth/sfState.en.json');
+const AUTH_JA    = path.join(__dirname, '../.auth/sfState.ja.json');
+const AUTH_ADMIN = path.join(__dirname, '../.auth/sfAdminState.json');
+const AUTH_TS    = path.join(__dirname, '../.auth/lastAuth.ts.txt');
 
-// Pre-seeded Account query that bypasses processIntent (AI backend).
-// Injected directly into the browser's localStorage so the LWC reads it at connectedCallback.
+const E2E_QUERY_NAME = '__e2e_test_accounts__';
 const E2E_ACCOUNT_QUERY = {
   name:         E2E_QUERY_NAME,
   sObject:      'Account',
@@ -25,25 +32,36 @@ const E2E_ACCOUNT_QUERY = {
   useCount: 0,
 };
 
-async function getSalesforceUserId(instanceUrl: string, accessToken: string): Promise<string> {
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+async function getUserId(instanceUrl: string, accessToken: string): Promise<string> {
   const res = await fetch(`${instanceUrl}/services/oauth2/userinfo`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw new Error(`[globalSetup] userinfo fetch failed: ${res.status}`);
-  const data = await res.json() as { user_id: string };
+  const data = await res.json() as { user_id: string; organization_id: string };
   return data.user_id;
 }
 
+async function getOrgId(instanceUrl: string, accessToken: string): Promise<string> {
+  const res = await fetch(`${instanceUrl}/services/oauth2/userinfo`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error(`[globalSetup] userinfo fetch failed: ${res.status}`);
+  const data = await res.json() as { user_id: string; organization_id: string };
+  return data.organization_id;
+}
+
 function getLastAuthAge(): number {
-  if (!fs.existsSync(AUTH_TS_FILE)) return Infinity;
-  const ts = parseInt(fs.readFileSync(AUTH_TS_FILE, 'utf-8').trim(), 10);
+  if (!fs.existsSync(AUTH_TS)) return Infinity;
+  const ts = parseInt(fs.readFileSync(AUTH_TS, 'utf-8').trim(), 10);
   return isNaN(ts) ? Infinity : Date.now() - ts;
 }
 
-function hasE2eQueryInFile(storageKey: string): boolean {
-  if (!fs.existsSync(AUTH_FILE)) return false;
+function hasE2eQuery(authFile: string, storageKey: string): boolean {
+  if (!fs.existsSync(authFile)) return false;
   try {
-    const state = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf-8')) as {
+    const state = JSON.parse(fs.readFileSync(authFile, 'utf-8')) as {
       origins?: Array<{ localStorage?: Array<{ name: string; value: string }> }>
     };
     for (const origin of (state.origins ?? [])) {
@@ -57,56 +75,7 @@ function hasE2eQueryInFile(storageKey: string): boolean {
   return false;
 }
 
-export default async function globalSetup(_config: FullConfig) {
-  const instanceUrl = process.env.SF_INSTANCE_URL;
-  const accessToken = process.env.SF_ACCESS_TOKEN;
-  const appUrl      = process.env.SF_APP_URL ?? '/lightning/page/home';
-
-  if (!instanceUrl || !accessToken) {
-    throw new Error('SF_INSTANCE_URL and SF_ACCESS_TOKEN must be set in .env');
-  }
-
-  const userId     = await getSalesforceUserId(instanceUrl, accessToken);
-  // LWS (Lightning Web Security) sandboxes localStorage — the LWC reads via
-  // a proxy that prefixes keys with "LSKey[c]" for the custom (c) namespace.
-  // We inject at the raw Storage level, so we must use the same prefixed key.
-  const storageKey = `LSKey[c]furubar_qs_${userId.slice(-8)}`;
-
-  // Fast path: recent auth (<25 min) with the e2e query already injected in the file
-  if (getLastAuthAge() < 25 * 60 * 1000 && hasE2eQueryInFile(storageKey)) {
-    console.log('[globalSetup] Reusing cached session (e2e query present)');
-    return;
-  }
-
-  // Full login flow
-  console.log('[globalSetup] Logging in to Salesforce via access token…');
-  const browser = await chromium.launch();
-  const context = await browser.newContext({ baseURL: instanceUrl });
-  const page    = await context.newPage();
-
-  // Frontdoor URL exchanges a session token for a Lightning session cookie.
-  const frontdoor = `${instanceUrl}/secur/frontdoor.jsp?sid=${accessToken}`;
-  await page.goto(frontdoor, { waitUntil: 'load', timeout: 60_000 });
-  await page.waitForURL(/lightning\.force\.com|\.salesforce\.com\/lightning/, { timeout: 60_000 });
-  await page.waitForTimeout(2_000);
-
-  // Dismiss any first-run modals
-  for (const sel of ['[title="Dismiss"]', 'button:has-text("後で")', 'button:has-text("Skip")']) {
-    const btn = page.locator(sel);
-    if (await btn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await btn.click().catch(() => {});
-    }
-  }
-
-  // Navigate to the app page — this ensures we're on the lightning.force.com origin
-  // so that localStorage.setItem() targets the same origin the LWC will read from.
-  await page.goto(appUrl, { waitUntil: 'load', timeout: 60_000 }).catch(() => {});
-  await page.waitForTimeout(3_000);
-
-  // Inject the e2e test query directly into browser localStorage so the LWC
-  // reads it at connectedCallback time.  Using page.evaluate guarantees the value
-  // lands in the same origin (lightning.force.com) and same storage partition that
-  // the LWC component accesses via localStorage.getItem().
+async function injectE2eQuery(page: any, storageKey: string): Promise<void> {
   await page.evaluate(
     ({ key, query, queryName }: { key: string; query: object; queryName: string }) => {
       const existing = localStorage.getItem(key);
@@ -115,25 +84,141 @@ export default async function globalSetup(_config: FullConfig) {
         try { queries = JSON.parse(existing); } catch { /* start fresh */ }
         if (!Array.isArray(queries)) queries = [];
       }
-      if (!queries.some((q: any) => q.name === queryName)) {
-        queries.unshift(query);
-      }
+      if (!queries.some((q: any) => q.name === queryName)) queries.unshift(query);
       localStorage.setItem(key, JSON.stringify(queries));
     },
-    { key: storageKey, query: E2E_ACCOUNT_QUERY, queryName: E2E_QUERY_NAME }
+    { key: storageKey, query: E2E_ACCOUNT_QUERY, queryName: E2E_QUERY_NAME },
+  );
+}
+
+async function dismissModals(page: any): Promise<void> {
+  for (const sel of ['[title="Dismiss"]', 'button:has-text("後で")', 'button:has-text("Skip")']) {
+    const btn = page.locator(sel);
+    if (await btn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await btn.click().catch(() => {});
+    }
+  }
+}
+
+// ── Admin session via frontdoor.jsp ──────────────────────────────────────────
+
+async function buildAdminSession(
+  instanceUrl: string,
+  accessToken: string,
+  appUrl: string,
+  outputFile: string,
+): Promise<void> {
+  const adminUserId = await getUserId(instanceUrl, accessToken);
+  const storageKey  = `LSKey[c]furubar_qs_${adminUserId.slice(-8)}`;
+
+  if (getLastAuthAge() < 25 * 60 * 1000 && hasE2eQuery(outputFile, storageKey)) {
+    console.log('[globalSetup] Reusing cached admin session');
+    return;
+  }
+
+  console.log('[globalSetup] Building admin session…');
+  const browser = await chromium.launch();
+  const context = await browser.newContext({ baseURL: instanceUrl });
+  const page    = await context.newPage();
+
+  await page.goto(`${instanceUrl}/secur/frontdoor.jsp?sid=${accessToken}`, {
+    waitUntil: 'load', timeout: 60_000,
+  });
+  await page.waitForURL(/\/lightning\//, { timeout: 60_000 });
+  await page.waitForTimeout(2_000);
+  await dismissModals(page);
+
+  await page.goto(`${instanceUrl}${appUrl}`, { waitUntil: 'load', timeout: 60_000 }).catch(() => {});
+  await page.waitForTimeout(3_000);
+  await injectE2eQuery(page, storageKey);
+
+  fs.mkdirSync(path.dirname(outputFile), { recursive: true });
+  await context.storageState({ path: outputFile });
+  await browser.close();
+  console.log('[globalSetup][admin] Session saved to', outputFile);
+}
+
+// ── User session via admin "Login As" (servlet.su) ────────────────────────────
+// Requires org setting: enableAdminLoginAsAnyUser = true
+
+async function buildUserSessionViaLoginAs(
+  instanceUrl: string,
+  adminToken: string,
+  targetUserId: string,
+  orgId: string,
+  adminUserId: string,
+  appUrl: string,
+  outputFile: string,
+  label: string,
+): Promise<void> {
+  console.log(`[globalSetup] Building ${label} session via Login As…`);
+  const browser = await chromium.launch();
+  const context = await browser.newContext({ baseURL: instanceUrl });
+  const page    = await context.newPage();
+
+  // Step 1: Establish admin session via frontdoor.jsp
+  await page.goto(`${instanceUrl}/secur/frontdoor.jsp?sid=${adminToken}`, {
+    waitUntil: 'load', timeout: 60_000,
+  });
+  await page.waitForURL(/\/lightning\//, { timeout: 60_000 });
+  await page.waitForTimeout(1_000);
+
+  // Step 2: Switch to target user via servlet.su
+  const loginAsUrl = `${instanceUrl}/servlet/servlet.su` +
+    `?oid=${orgId}` +
+    `&suorgadminid=${adminUserId}` +
+    `&targetURL=${encodeURIComponent(instanceUrl + appUrl)}` +
+    `&loginAsUserId=${targetUserId}`;
+
+  await page.goto(loginAsUrl, { waitUntil: 'load', timeout: 60_000 });
+  await page.waitForURL(/\/lightning\//, { timeout: 60_000 });
+  await page.waitForTimeout(3_000);
+  await dismissModals(page);
+
+  await page.goto(`${instanceUrl}${appUrl}`, { waitUntil: 'load', timeout: 60_000 }).catch(() => {});
+  await page.waitForTimeout(3_000);
+
+  // Derive the localStorage key from the known targetUserId — no in-browser fetch needed.
+  const storageKey = `LSKey[c]furubar_qs_${targetUserId.slice(-8)}`;
+  await injectE2eQuery(page, storageKey);
+  console.log(`[globalSetup][${label}] Injected e2e query at key ${storageKey}`);
+
+  fs.mkdirSync(path.dirname(outputFile), { recursive: true });
+  await context.storageState({ path: outputFile });
+  await browser.close();
+  console.log(`[globalSetup][${label}] Session saved to ${outputFile}`);
+}
+
+// ── Entry point ─────────────────────────────────────────────────────────────
+
+export default async function globalSetup(_config: FullConfig) {
+  const instanceUrl = process.env.SF_INSTANCE_URL!;
+  const appUrl      = process.env.SF_APP_URL ?? '/lightning/page/home';
+  const adminToken  = process.env.SF_ADMIN_ACCESS_TOKEN!;
+
+  if (!instanceUrl) throw new Error('SF_INSTANCE_URL must be set in .env');
+  if (!adminToken)  throw new Error('SF_ADMIN_ACCESS_TOKEN must be set in .env');
+
+  const orgId      = await getOrgId(instanceUrl, adminToken);
+  const adminUserId = await getUserId(instanceUrl, adminToken);
+
+  // Admin session
+  await buildAdminSession(instanceUrl, adminToken, appUrl, AUTH_ADMIN);
+
+  // EN user — Login As (no device verification)
+  await buildUserSessionViaLoginAs(
+    instanceUrl, adminToken,
+    '005aj00000eophpAAA', // flashbar.test.en
+    orgId, adminUserId, appUrl, AUTH_EN, 'en-user',
   );
 
-  // Verify the injection landed
-  const injected = await page.evaluate((key: string) => {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    try { return (JSON.parse(raw) as any[])[0]?.name ?? null; } catch { return null; }
-  }, storageKey);
-  console.log(`[globalSetup] Injected key ${storageKey} → first query name: ${injected}`);
+  // JA user — Login As (no device verification)
+  await buildUserSessionViaLoginAs(
+    instanceUrl, adminToken,
+    '005aj00000eophqAAA', // flashbar.test.ja
+    orgId, adminUserId, appUrl, AUTH_JA, 'ja-user',
+  );
 
-  await context.storageState({ path: AUTH_FILE });
-  fs.writeFileSync(AUTH_TS_FILE, String(Date.now()));
-  await browser.close();
-
-  console.log('[globalSetup] Session saved to', AUTH_FILE);
+  fs.mkdirSync(path.dirname(AUTH_TS), { recursive: true });
+  fs.writeFileSync(AUTH_TS, String(Date.now()));
 }

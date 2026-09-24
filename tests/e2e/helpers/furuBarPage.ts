@@ -164,25 +164,31 @@ export class FuruBarPage {
    * worker is down.
    */
   async loadAccountsViaShortcut() {
-    // Wait for the shortcut section to render (requires _savedQueries.length > 0
-    // and no existing SOQL results / CSV state).
-    await this.page.waitForFunction(() => {
+    // Try the pre-seeded shortcut chip first (fast path, bypasses AI Worker).
+    // Falls back to a direct NL query if the chip isn't present within 8 s
+    // (e.g. storageState was not applied to this origin in the current run).
+    const chipFound = await this.page.waitForFunction(() => {
       const bar  = document.querySelector('c-furu-agent-bar');
       const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
       const chips = Array.from(root.querySelectorAll('.furu-bar__shortcut-run'));
       return chips.some(c => c.textContent?.includes('__e2e_test_accounts__'));
-    }, { timeout: 20_000 });
+    }, { timeout: 8_000 }).then(() => true).catch(() => false);
 
-    await this.page.evaluate(() => {
-      const bar  = document.querySelector('c-furu-agent-bar');
-      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
-      const chips = Array.from(root.querySelectorAll('.furu-bar__shortcut-run'));
-      const chip  = chips.find(c => c.textContent?.includes('__e2e_test_accounts__'));
-      (chip as HTMLButtonElement | undefined)?.click();
-    });
+    if (chipFound) {
+      await this.page.evaluate(() => {
+        const bar  = document.querySelector('c-furu-agent-bar');
+        const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+        const chips = Array.from(root.querySelectorAll('.furu-bar__shortcut-run'));
+        const chip  = chips.find(c => c.textContent?.includes('__e2e_test_accounts__'));
+        (chip as HTMLButtonElement | undefined)?.click();
+      });
+    } else {
+      // Fallback: submit a direct query for up to 5 Accounts
+      await this.typeCommand('取引先を5件見せて');
+      await this.submit();
+    }
 
-    // _runSoqlFromSaved calls executeSoqlQuery directly — no AI, ~3–7 s typical
-    await this.waitForSoqlResults(30_000);
+    await this.waitForSoqlResults(90_000);
   }
 
   async waitForSoqlResults(timeout = 30_000) {
