@@ -89,6 +89,11 @@ const SOQL_DEFAULT_FIELDS = {
     ],
 };
 
+// Known CURRENCY-type field API names shown in SOQL results (card + table views).
+// selectFields doesn't carry fieldType in read mode (only the inline-edit schema
+// fetch does), so this is a static allowlist rather than a dynamic describe check.
+const CURRENCY_FIELD_NAMES = new Set(['Amount', 'AnnualRevenue', 'ExpectedRevenue', 'TotalPrice', 'UnitPrice']);
+
 const INACTIVE_DAYS = 14;  // warning threshold for LastActivityDate
 
 // Child sObject → required parent lookup field config
@@ -351,6 +356,22 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             });
     }
 
+    // Locale-aware currency formatting (org currency assumed JPY — the org this app
+    // ships against is JPY-denominated; multi-currency orgs would need the record's
+    // own CurrencyIsoCode, which isn't currently queried).
+    _formatCurrency(raw) {
+        const num = Number(raw);
+        if (isNaN(num)) return String(raw);
+        const locale = this.isJa ? 'ja-JP' : 'en-US';
+        try {
+            return new Intl.NumberFormat(locale, {
+                style: 'currency', currency: 'JPY', maximumFractionDigits: 0,
+            }).format(num);
+        } catch (e) {
+            return '¥' + num.toLocaleString(locale);
+        }
+    }
+
     // Returns a human-readable label for any sObject (falls back to humanized API name).
     _sObjectLabel(sObj) {
         if (!sObj) return '';
@@ -477,8 +498,8 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
                 .map(f => {
                     const raw = rec[f.apiName] ?? '';
                     let display = raw === '' || raw == null ? '—' : String(raw);
-                    if (f.apiName === 'Amount' && raw !== '') {
-                        display = '￥' + Number(raw).toLocaleString();
+                    if (CURRENCY_FIELD_NAMES.has(f.apiName) && raw !== '' && raw != null) {
+                        display = this._formatCurrency(raw);
                     } else if (f.apiName === 'LastActivityDate') {
                         display = raw ? `${daysSince}日前` : '—';
                         if (isInactive) display += ' ⚠️';
@@ -842,7 +863,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
                 .map((f, ci) => {
                     const raw = rec[f.apiName];
                     let val = raw == null ? '' : String(raw);
-                    if (f.apiName === 'Amount' && raw != null)         val = '￥' + Number(raw).toLocaleString();
+                    if (CURRENCY_FIELD_NAMES.has(f.apiName) && raw != null) val = this._formatCurrency(raw);
                     else if (f.apiName === 'LastActivityDate' && raw)  val = `${daysSince}日前${isInactive ? ' ⚠️' : ''}`;
                     else if (f.apiName === 'LastActivityDate' && !raw) val = '—';
 
