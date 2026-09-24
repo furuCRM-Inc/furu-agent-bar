@@ -149,7 +149,7 @@ const SOBJECT_LABELS_JA = {
 const I18N = {
     ja: {
         placeholder:  '〒 住所、営業メモ、またはコマンドを入力...',
-        hint:         'Shift+Enter: 改行 | Enter: 実行',
+        hint:         'Shift+Enter: 改行 | Enter: 実行 | ⌘K/⌘/: パレット表示',
         undo:         '元に戻す',
         save:         '保存',
         discard:      '破棄',
@@ -173,7 +173,7 @@ const I18N = {
     },
     en: {
         placeholder:  'Enter 〒 postal code, paste notes, or type a command...',
-        hint:         'Shift+Enter: newline | Enter: run',
+        hint:         'Shift+Enter: newline | Enter: run | ⌘K/⌘/: open palette',
         undo:         'Undo',
         save:         'Save',
         discard:      'Discard',
@@ -1324,8 +1324,13 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     // ── Global keyboard shortcuts ─────────────────────────────────────────────
 
     _onGlobalKey(e) {
-        // Cmd+K / Ctrl+K — toggle palette (open + focus, or close)
-        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'k') {
+        // Cmd+K / Ctrl+K — toggle palette (open + focus, or close).
+        // Cmd+/ / Ctrl+/ is a fallback binding: macOS Chrome reserves Cmd+K for its
+        // native "Search Tabs" menu command (and Cmd+J for Downloads — also tried,
+        // also reserved), which consumes the key at the OS/menu level before a
+        // keydown event ever reaches the page, so preventDefault() here can't
+        // intercept it. Cmd+/ isn't claimed by Chrome or macOS, verified live.
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === 'k' || e.key === '/')) {
             e.preventDefault();
             this._togglePalette();
         }
@@ -1360,14 +1365,28 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     }
 
     _clickUtilityBarToggle() {
-        // Salesforce renders the utility bar toggle as a button in the utility bar footer.
-        // The aria-label contains the component's label ("furuAgent Bar" or similar).
-        const btn = document.querySelector('button[aria-label*="furu"], button[aria-label*="Furu"]');
-        if (btn) { btn.click(); return; }
-        // Fallback: click the utility bar item that contains this component's host
-        const host = this.template.host;
-        const utilityItem = host?.closest('[data-aura-class*="utilityBar"], .slds-utility-bar__action');
-        if (utilityItem) utilityItem.click();
+        // Salesforce only sets a text aria-label on the utility bar toggle button once
+        // its panel has been opened at least once; in the collapsed/cold-load state the
+        // button's aria-label is often empty, so this can't be the only strategy.
+        const specificSelectors = [
+            'button[aria-label*="furuAgent" i]',
+            'button[aria-label*="FlashBar" i]',
+            'button[aria-label*="Furu" i]',
+            'button[title*="furuAgent" i]',
+        ];
+        for (const sel of specificSelectors) {
+            const btn = document.querySelector(sel);
+            if (btn) { btn.click(); return; }
+        }
+        // this.template.host has no DOM ancestor relationship to the toggle button (it
+        // lives in the App's utility bar chrome, not around this component's own
+        // content), so closest() can never find it — go generic instead: furuAgentBar
+        // is conventionally added last to the utility bar, so the last item is it.
+        const utilityBtns = document.querySelectorAll(
+            '.slds-utility-bar__item button, one-utility-bar-item button'
+        );
+        const lastBtn = utilityBtns[utilityBtns.length - 1];
+        if (lastBtn) lastBtn.click();
     }
 
     _popOutWindow() {
