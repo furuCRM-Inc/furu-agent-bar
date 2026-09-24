@@ -1130,6 +1130,43 @@ public with sharing class FuruAgentController {
                 }
             }
 
+            // 4b-fix. SOQL_SEARCH: correct misclassified date-field conditions.
+            // The Worker sometimes uses CreatedDate when the user means CloseDate (Opportunity).
+            // If the input contains "今月|this month" + "完了|close|due" keywords and the
+            // returned conditions reference CreatedDate, replace with CloseDate = THIS_MONTH.
+            if (result.intent == 'SOQL_SEARCH' && result.soqlRecords != null && result.soqlFilterJson != null) {
+                String lower = (userInput ?? '').toLowerCase();
+                Boolean wantsCloseDate = (lower.contains('完了予定') || lower.contains('期限') || lower.contains('close') || lower.contains('due'))
+                    && (lower.contains('今月') || lower.contains('this month') || lower.contains('今週') || lower.contains('this week'));
+                if (wantsCloseDate) {
+                    try {
+                        List<Object> conds = (List<Object>) JSON.deserializeUntyped(result.soqlFilterJson);
+                        Boolean hasCloseDate = false;
+                        Boolean hasCreatedDate = false;
+                        for (Object raw : conds) {
+                            Map<String, Object> cm = (Map<String, Object>) raw;
+                            if ('CloseDate'.equalsIgnoreCase(String.valueOf(cm.get('field')))) hasCloseDate = true;
+                            if ('CreatedDate'.equalsIgnoreCase(String.valueOf(cm.get('field')))) hasCreatedDate = true;
+                        }
+                        if (!hasCloseDate && hasCreatedDate) {
+                            // Replace CreatedDate conditions with CloseDate = THIS_MONTH
+                            List<Object> fixed = new List<Object>();
+                            for (Object raw : conds) {
+                                Map<String, Object> cm = (Map<String, Object>) raw;
+                                if (!'CreatedDate'.equalsIgnoreCase(String.valueOf(cm.get('field')))) {
+                                    fixed.add(cm);
+                                }
+                            }
+                            fixed.add(new Map<String, Object>{ 'field' => 'CloseDate', 'op' => 'eq', 'value' => 'THIS_MONTH' });
+                            String fixedJson = JSON.serialize(fixed);
+                            result.soqlFilterJson = fixedJson;
+                            result.soqlRecords = executeSoqlQuery(
+                                result.updateSObject ?? sObjectType, fixedJson, null, null, 20, 0);
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+
             // 4c. NAVIGATE with no targetRecordId + ranking/listing intent → SOQL_SEARCH
             // The Worker occasionally misclassifies "show me top N highest X" as a list-view
             // navigation instead of a ranked query.  Intercept here and execute the query.

@@ -208,6 +208,127 @@ test.describe('SOQL Suggestion Chips', () => {
     expect(labelsAfter).not.toContain(firstLabel);
   });
 
+  // ── condition badges (applied conditions display) ────────────────────────────
+
+  test('condition badge appears after clicking a condition chip', async ({ page }) => {
+    const appeared = await waitForChips(page, '.furu-bar__suggestion-chip--cond', 5_000);
+    if (!appeared) { test.skip(); return; }
+
+    // Click first condition chip
+    await page.evaluate(() => {
+      const bar  = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      const chip = root.querySelector('.furu-bar__suggestion-chip--cond') as HTMLButtonElement | null;
+      chip?.click();
+    });
+
+    await page.waitForFunction(() => {
+      const bar  = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      return !root.querySelector('.furu-bar__soql-loading');
+    }, { timeout: 15_000 });
+
+    // A green condition badge should now be visible
+    const badgeCount = await page.evaluate(() => {
+      const bar  = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      return root.querySelectorAll('.furu-bar__soql-cond-badge').length;
+    });
+    expect(badgeCount).toBeGreaterThan(0);
+  });
+
+  test('condition badge label reflects the applied filter', async ({ page }) => {
+    const appeared = await waitForChips(page, '.furu-bar__suggestion-chip--cond', 5_000);
+    if (!appeared) { test.skip(); return; }
+
+    // Record which chip label was clicked
+    const firstChipLabel = await page.evaluate(() => {
+      const bar  = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      const chip = root.querySelector('.furu-bar__suggestion-chip--cond') as HTMLElement | null;
+      return chip?.innerText?.trim() ?? '';
+    });
+
+    await page.evaluate(() => {
+      const bar  = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      (root.querySelector('.furu-bar__suggestion-chip--cond') as HTMLButtonElement | null)?.click();
+    });
+
+    await page.waitForFunction(() => {
+      const bar  = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      return !root.querySelector('.furu-bar__soql-loading');
+    }, { timeout: 15_000 });
+
+    // Badge should have non-empty label text
+    const badgeLabels = await page.evaluate(() => {
+      const bar  = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      return Array.from(root.querySelectorAll('.furu-bar__soql-cond-badge'))
+        .map(el => (el as HTMLElement).innerText?.replace('✕', '').trim());
+    });
+    expect(badgeLabels.length).toBeGreaterThan(0);
+    badgeLabels.forEach(l => expect(l.length).toBeGreaterThan(0));
+  });
+
+  test('removing a condition badge re-queries and restores the condition chip', async ({ page }) => {
+    const appeared = await waitForChips(page, '.furu-bar__suggestion-chip--cond', 5_000);
+    if (!appeared) { test.skip(); return; }
+
+    // Apply the first condition chip
+    await page.evaluate(() => {
+      const bar  = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      (root.querySelector('.furu-bar__suggestion-chip--cond') as HTMLButtonElement | null)?.click();
+    });
+    await page.waitForFunction(() => {
+      const bar  = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      return !root.querySelector('.furu-bar__soql-loading');
+    }, { timeout: 15_000 });
+
+    // Verify badge appeared
+    const badgeBefore = await page.evaluate(() => {
+      const bar  = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      return root.querySelectorAll('.furu-bar__soql-cond-badge').length;
+    });
+    expect(badgeBefore).toBeGreaterThan(0);
+
+    const condChipsBefore = await condChipLabels(page);
+
+    // Click ✕ on the first condition badge
+    await page.evaluate(() => {
+      const bar  = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      const rmBtn = root.querySelector('.furu-bar__soql-cond-badge .furu-bar__soql-field-rm') as HTMLButtonElement | null;
+      rmBtn?.click();
+    });
+
+    await page.waitForFunction(() => {
+      const bar  = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      return !root.querySelector('.furu-bar__soql-loading');
+    }, { timeout: 15_000 });
+
+    // Badge should be gone
+    const badgeAfter = await page.evaluate(() => {
+      const bar  = document.querySelector('c-furu-agent-bar');
+      const root = (bar as HTMLElement)?.shadowRoot ?? bar!;
+      return root.querySelectorAll('.furu-bar__soql-cond-badge').length;
+    });
+    expect(badgeAfter).toBe(0);
+
+    // Condition chip should reappear (more chips than before removal)
+    const condChipsAfter = await condChipLabels(page);
+    expect(condChipsAfter.length).toBeGreaterThan(condChipsBefore.length);
+
+    // Status updated
+    const statusText = await bar.statusText();
+    expect(statusText).toMatch(/件が見つかりました|record.*found/i);
+  });
+
   // ── chips clear on dismiss ───────────────────────────────────────────────────
 
   test('suggestion chips clear when SOQL results are dismissed', async ({ page }) => {

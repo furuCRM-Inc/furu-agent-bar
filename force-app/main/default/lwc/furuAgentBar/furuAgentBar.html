@@ -716,6 +716,22 @@
                     </template>
                 </div>
 
+                <!-- Active condition badges -->
+                <template lwc:if={hasConditionBadges}>
+                    <div class="furu-bar__soql-fields">
+                        <span class="furu-bar__soql-fields-label">🔍</span>
+                        <template for:each={soqlConditionBadges} for:item="c">
+                            <span key={c.idx} class="furu-bar__soql-cond-badge">
+                                {c.label}
+                                <button class="furu-bar__soql-field-rm"
+                                        data-idx={c.idx}
+                                        onclick={handleRemoveSoqlCondition}
+                                        type="button">✕</button>
+                            </span>
+                        </template>
+                    </div>
+                </template>
+
                 <!-- Field suggestion chips -->
                 <template lwc:if={hasFieldSuggestions}>
                     <div class="furu-bar__soql-chip-row">

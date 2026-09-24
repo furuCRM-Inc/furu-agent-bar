@@ -504,6 +504,84 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
     get soqlIsLoadingMore()     { return this._soqlQuery?.isLoadingMore ?? false; }
     get hasFieldSuggestions()   { return !!this._soqlQuery && this._fieldSuggestions.length > 0; }
     get hasCondSuggestions()    { return !!this._soqlQuery && this._condSuggestions.length > 0; }
+    get hasConditionBadges()    { return !!this._soqlQuery && (this._soqlQuery.conditions?.length ?? 0) > 0; }
+
+    get soqlConditionBadges() {
+        if (!this._soqlQuery?.conditions?.length) return [];
+        const isJa = this.isJa;
+        const opLabel = {
+            eq: '=', neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤',
+            like:     isJa ? '含む'   : 'contains',
+            is_null:  isJa ? '空'     : 'empty',
+            not_null: isJa ? 'あり'   : 'exists',
+            in: 'IN', not_in: 'NOT IN',
+        };
+        // Well-known Salesforce field labels (condition fields may not be in selectFields)
+        const knownFieldLabels = isJa ? {
+            CreatedDate: '作成日', LastModifiedDate: '最終更新日', CloseDate: '完了予定日',
+            Amount: '金額', StageName: 'フェーズ', AccountId: '取引先', OwnerId: '担当者',
+            IsClosed: '完了', IsConverted: '変換済み', Priority: '優先度',
+            Status: 'ステータス', Type: '取引先種別', AnnualRevenue: '年間売上', Title: '役職',
+        } : {
+            CreatedDate: 'Created Date', LastModifiedDate: 'Last Modified', CloseDate: 'Close Date',
+            Amount: 'Amount', StageName: 'Stage', AccountId: 'Account', OwnerId: 'Owner',
+            IsClosed: 'Closed', IsConverted: 'Converted', Priority: 'Priority',
+            Status: 'Status', Type: 'Type', AnnualRevenue: 'Annual Revenue', Title: 'Title',
+        };
+        // Fixed date literals
+        const fixedDates = isJa ? {
+            TODAY: '今日', THIS_WEEK: '今週', THIS_MONTH: '今月',
+            THIS_QUARTER: '今四半期', THIS_YEAR: '今年',
+            LAST_WEEK: '先週', LAST_MONTH: '先月', LAST_YEAR: '昨年',
+            YESTERDAY: '昨日', TOMORROW: '明日', NEXT_WEEK: '来週', NEXT_MONTH: '来月',
+        } : {
+            TODAY: 'today', THIS_WEEK: 'this week', THIS_MONTH: 'this month',
+            THIS_QUARTER: 'this quarter', THIS_YEAR: 'this year',
+            LAST_WEEK: 'last week', LAST_MONTH: 'last month', LAST_YEAR: 'last year',
+            YESTERDAY: 'yesterday', TOMORROW: 'tomorrow', NEXT_WEEK: 'next week', NEXT_MONTH: 'next month',
+        };
+
+        return this._soqlQuery.conditions.map((c, i) => {
+            const op = opLabel[c.op] ?? c.op;
+            let val = '';
+            let isDateLiteral = false;
+            if (c.op !== 'is_null' && c.op !== 'not_null' && c.value != null) {
+                const upper = String(c.value).toUpperCase();
+                if (fixedDates[upper]) {
+                    val = fixedDates[upper];
+                    isDateLiteral = true;
+                } else {
+                    // Handle LAST_N_DAYS:N, NEXT_N_MONTHS:3 etc.
+                    const nMatch = /^(LAST|NEXT)_N_(DAYS|MONTHS|WEEKS|QUARTERS|YEARS):(\d+)$/i.exec(upper);
+                    if (nMatch) {
+                        const dir   = nMatch[1].toUpperCase() === 'LAST'
+                            ? (isJa ? '過去' : 'last') : (isJa ? '今後' : 'next');
+                        const unit  = { DAYS: isJa ? '日' : 'days', MONTHS: isJa ? 'ヶ月' : 'months',
+                            WEEKS: isJa ? '週' : 'weeks', QUARTERS: isJa ? '四半期' : 'quarters',
+                            YEARS: isJa ? '年' : 'years' }[nMatch[2]] ?? nMatch[2].toLowerCase();
+                        val = isJa ? `${dir}${nMatch[3]}${unit}` : `${dir} ${nMatch[3]} ${unit}`;
+                        isDateLiteral = true;
+                    } else {
+                        const num = Number(c.value);
+                        val = !isNaN(num) && num >= 1000
+                            ? num.toLocaleString()
+                            : String(c.value);
+                    }
+                }
+            }
+            // Field label: prefer selectFields, then static map, then API name
+            const fieldDef = this._soqlQuery.selectFields?.find(f => f.apiName === c.field);
+            const fieldLabel = fieldDef
+                ? (isJa ? (fieldDef.label ?? fieldDef.labelEn ?? c.field) : (fieldDef.labelEn ?? fieldDef.label ?? c.field))
+                : (knownFieldLabels[c.field] ?? c.field);
+            // Date literals: skip the operator (showing "完了予定日: 今月" is cleaner than "完了予定日 = 今月")
+            const sep = isDateLiteral ? ': ' : ` ${op} `;
+            return {
+                idx:   String(i),
+                label: val ? `${fieldLabel}${sep}${val}` : `${fieldLabel} ${op}`,
+            };
+        });
+    }
     get soqlLoadMoreLabel()     { return this.isJa ? 'さらに読み込む' : 'Load more'; }
     get soqlShortcutsLabel()    { return this.isJa ? 'よく使う検索' : 'Saved searches'; }
 
@@ -2661,6 +2739,36 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
             this._soqlQuery = { ...this._soqlQuery, records, isLoading: false, hasMore: records.length === this._soqlQuery.limit };
             this._setStatus(
                 this.isJa ? `${records.length}件が見つかりました` : `${records.length} record(s) found`, 'info'
+            );
+        } catch (err) {
+            this._soqlQuery = { ...this._soqlQuery, isLoading: false };
+            this._setStatus(err.body?.message ?? err.message ?? 'Query failed', 'error');
+        }
+    }
+
+    async handleRemoveSoqlCondition(e) {
+        const idx = parseInt(e.currentTarget.dataset.idx, 10);
+        if (!this._soqlQuery) return;
+        const remaining = this._soqlQuery.conditions.filter((_, i) => i !== idx);
+        this._soqlQuery = { ...this._soqlQuery, conditions: remaining, isLoading: true };
+        try {
+            const records = await executeSoqlQuery({
+                sObjectType:        this._soqlQuery.sObject,
+                conditionsJson:     JSON.stringify(remaining),
+                selectApiNamesJson: JSON.stringify(this._soqlQuery.selectFields.map(f => f.apiName)),
+                orderBy:            this._soqlQuery.orderBy,
+                maxRows:            this._soqlQuery.limit,
+                offsetRows:         0,
+            });
+            this._soqlQuery = { ...this._soqlQuery, records, isLoading: false, hasMore: records.length === this._soqlQuery.limit };
+            this._setStatus(
+                this.isJa ? `${records.length}件が見つかりました` : `${records.length} record(s) found`, 'info'
+            );
+            // Rebuild condition chips so removed condition reappears as a suggestion
+            this._condSuggestions = this._buildCondSuggestions(
+                this._soqlQuery.sObject,
+                new Set(this._soqlQuery.selectFields.map(f => f.apiName)),
+                remaining
             );
         } catch (err) {
             this._soqlQuery = { ...this._soqlQuery, isLoading: false };
