@@ -12,7 +12,7 @@ Built on a stateless **JEV (JSON Event Vector) architecture** running on **Cloud
 
 ## Key Features
 
-- **Sub-second `Cmd+K` palette** — Instant modal available from anywhere in Lightning Experience
+- **Sub-second command palette** — Instant modal available from anywhere in Lightning Experience via `Cmd+K`/`Ctrl+K`, or `Cmd+/`/`Ctrl+/` (macOS Chrome reserves `Cmd+K` for its own "Search Tabs" command, which can prevent the page from ever seeing that keypress — `Cmd+/` is the reliable binding there)
 - **Label-first UI** — All fields and filters display localized Japanese/English labels (`商談金額`) rather than raw API names (`Amount`)
 - **Any-object search** — Query and filter any standard or custom object with dynamic column management; no hardcoded object list
 - **Relational lookup engine** — Filter on 1-level parent relationships (`Account.Type`, `Owner.Name`, `MyParent__r.Field__c`) directly from filter chips
