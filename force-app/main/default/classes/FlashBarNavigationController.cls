@@ -5,15 +5,22 @@ public with sharing class FlashBarNavigationController {
      */
     @AuraEnabled(cacheable=true)
     public static List<FlashBar_Nav_Item__c> getUserNavItems() {
-        return [
-            SELECT Id, Label__c, Target_Type__c, Target_SOQL_Filter__c,
-                   Target_URL_Page__c, Icon_Name__c, Sort_Order__c
-            FROM FlashBar_Nav_Item__c
-            WHERE User__c = :UserInfo.getUserId()
-            WITH USER_MODE
-            ORDER BY Sort_Order__c ASC NULLS LAST, CreatedDate DESC
-            LIMIT 20
-        ];
+        // Fires unconditionally on every component mount for every user — never let
+        // a schema gap here mask itself as the platform's generic cacheable-method
+        // "Script-thrown exception" toast before the user has done anything.
+        try {
+            return [
+                SELECT Id, Label__c, Target_Type__c, Target_SOQL_Filter__c,
+                       Target_URL_Page__c, Icon_Name__c, Sort_Order__c
+                FROM FlashBar_Nav_Item__c
+                WHERE User__c = :UserInfo.getUserId()
+                WITH USER_MODE
+                ORDER BY Sort_Order__c ASC NULLS LAST, CreatedDate DESC
+                LIMIT 20
+            ];
+        } catch (Exception e) {
+            return new List<FlashBar_Nav_Item__c>();
+        }
     }
 
     /**

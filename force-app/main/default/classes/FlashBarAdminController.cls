@@ -30,54 +30,70 @@ public with sharing class FlashBarAdminController {
     public static AdminContext getAdminContext() {
         AdminContext ctx = new AdminContext();
         ctx.isAdmin      = isFlashBarAdmin();
-        ctx.pendingCount = ctx.isAdmin
-            ? Database.countQuery('SELECT COUNT() FROM FuruAgent_Knowledge__c WHERE Status__c = \'Pending\'')
-            : 0;
+        ctx.pendingCount = 0;
+        if (ctx.isAdmin) {
+            try {
+                ctx.pendingCount = Database.countQuery(
+                    'SELECT COUNT() FROM FuruAgent_Knowledge__c WHERE Status__c = \'Pending\'');
+            } catch (Exception e) {
+                // Fires on every component mount for admin users — never let a schema
+                // gap here mask itself as the platform's generic cacheable-method
+                // "Script-thrown exception" toast on top of an unrelated action.
+            }
+        }
         return ctx;
     }
 
     @AuraEnabled(cacheable=true)
     public static List<KnowledgeRule> getPendingRules(String sObjectType) {
         if (!isFlashBarAdmin()) return new List<KnowledgeRule>();
-        List<FuruAgent_Knowledge__c> recs = [
-            SELECT Id, Target_sObject__c, Plain_English_Rule__c, Error_Message__c, Status__c,
-                   Occurrences__c, CreatedDate, Trigger_Field__c
-            FROM FuruAgent_Knowledge__c
-            WHERE Status__c = 'Pending'
-            ORDER BY Occurrences__c DESC NULLS LAST, CreatedDate DESC
-            LIMIT 5
-        ];
-        // Prioritise records matching current sObject, then others
-        List<FuruAgent_Knowledge__c> priority = new List<FuruAgent_Knowledge__c>();
-        List<FuruAgent_Knowledge__c> rest     = new List<FuruAgent_Knowledge__c>();
-        for (FuruAgent_Knowledge__c r : recs) {
-            if (r.Target_sObject__c == sObjectType) priority.add(r);
-            else rest.add(r);
+        try {
+            List<FuruAgent_Knowledge__c> recs = [
+                SELECT Id, Target_sObject__c, Plain_English_Rule__c, Error_Message__c, Status__c,
+                       Occurrences__c, CreatedDate, Trigger_Field__c
+                FROM FuruAgent_Knowledge__c
+                WHERE Status__c = 'Pending'
+                ORDER BY Occurrences__c DESC NULLS LAST, CreatedDate DESC
+                LIMIT 5
+            ];
+            // Prioritise records matching current sObject, then others
+            List<FuruAgent_Knowledge__c> priority = new List<FuruAgent_Knowledge__c>();
+            List<FuruAgent_Knowledge__c> rest     = new List<FuruAgent_Knowledge__c>();
+            for (FuruAgent_Knowledge__c r : recs) {
+                if (r.Target_sObject__c == sObjectType) priority.add(r);
+                else rest.add(r);
+            }
+            List<FuruAgent_Knowledge__c> sorted = new List<FuruAgent_Knowledge__c>();
+            sorted.addAll(priority);
+            sorted.addAll(rest);
+            return toRuleList(sorted);
+        } catch (Exception e) {
+            return new List<KnowledgeRule>();
         }
-        List<FuruAgent_Knowledge__c> sorted = new List<FuruAgent_Knowledge__c>();
-        sorted.addAll(priority);
-        sorted.addAll(rest);
-        return toRuleList(sorted);
     }
 
     @AuraEnabled(cacheable=true)
     public static List<KnowledgeRule> getAllRules(String sObjectType) {
         if (!isFlashBarAdmin()) return new List<KnowledgeRule>();
-        String filter = String.isNotBlank(sObjectType) ? sObjectType : null;
-        List<FuruAgent_Knowledge__c> recs = filter != null
-            ? [SELECT Id, Target_sObject__c, Plain_English_Rule__c, Error_Message__c, Status__c,
-                      Occurrences__c, CreatedDate, Trigger_Field__c
-               FROM FuruAgent_Knowledge__c
-               WHERE Target_sObject__c = :filter AND Status__c != 'Rejected'
-               WITH USER_MODE
-               ORDER BY Status__c, Occurrences__c DESC NULLS LAST LIMIT 50]
-            : [SELECT Id, Target_sObject__c, Plain_English_Rule__c, Error_Message__c, Status__c,
-                      Occurrences__c, CreatedDate, Trigger_Field__c
-               FROM FuruAgent_Knowledge__c
-               WHERE Status__c != 'Rejected'
-               WITH USER_MODE
-               ORDER BY Status__c, Occurrences__c DESC NULLS LAST LIMIT 50];
-        return toRuleList(recs);
+        try {
+            String filter = String.isNotBlank(sObjectType) ? sObjectType : null;
+            List<FuruAgent_Knowledge__c> recs = filter != null
+                ? [SELECT Id, Target_sObject__c, Plain_English_Rule__c, Error_Message__c, Status__c,
+                          Occurrences__c, CreatedDate, Trigger_Field__c
+                   FROM FuruAgent_Knowledge__c
+                   WHERE Target_sObject__c = :filter AND Status__c != 'Rejected'
+                   WITH USER_MODE
+                   ORDER BY Status__c, Occurrences__c DESC NULLS LAST LIMIT 50]
+                : [SELECT Id, Target_sObject__c, Plain_English_Rule__c, Error_Message__c, Status__c,
+                          Occurrences__c, CreatedDate, Trigger_Field__c
+                   FROM FuruAgent_Knowledge__c
+                   WHERE Status__c != 'Rejected'
+                   WITH USER_MODE
+                   ORDER BY Status__c, Occurrences__c DESC NULLS LAST LIMIT 50];
+            return toRuleList(recs);
+        } catch (Exception e) {
+            return new List<KnowledgeRule>();
+        }
     }
 
     // ── Write methods ─────────────────────────────────────────────────────────
