@@ -1,5 +1,6 @@
 import { LightningElement, api, track } from 'lwc';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
+import LANG from '@salesforce/i18n/lang';
 import getCaseContext    from '@salesforce/apex/FlashBar_CaseTriageController.getCaseContext';
 import scoreTriage       from '@salesforce/apex/FlashBar_CaseTriageController.scoreTriage';
 import assignCaseToQueue from '@salesforce/apex/FlashBar_CaseTriageController.assignCaseToQueue';
@@ -26,7 +27,7 @@ export default class FlashBarCaseTriageCard extends LightningElement {
         this._error   = null;
         try {
             const ctx = await getCaseContext({ caseId: this.recordId });
-            const result = await scoreTriage({ requestJson: JSON.stringify(ctx) });
+            const result = await scoreTriage({ requestJson: JSON.stringify({ ...ctx, userLanguage: LANG }) });
             this._triage = result;
         } catch (e) {
             this._error = e.body?.message ?? e.message ?? 'Triage analysis failed.';

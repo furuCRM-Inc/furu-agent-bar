@@ -1,5 +1,6 @@
 import { LightningElement, api, track, wire } from 'lwc';
 import { getRecord, getFieldValue } from 'lightning/uiRecordApi';
+import LANG from '@salesforce/i18n/lang';
 import NAME_FIELD from '@salesforce/schema/User.Name';
 import qualifyLeads          from '@salesforce/apex/FlashBar_LeadAssigner.qualifyLeads';
 import assignLeadsRoundRobin from '@salesforce/apex/FlashBar_LeadAssigner.assignLeadsRoundRobin';
@@ -68,7 +69,7 @@ export default class FuruAgentLeadAssigner extends LightningElement {
             }
 
             const settled = await Promise.allSettled(
-                chunks.map(chunk => qualifyLeads({ requestJson: JSON.stringify({ leads: chunk }) }))
+                chunks.map(chunk => qualifyLeads({ requestJson: JSON.stringify({ leads: chunk, userLanguage: LANG }) }))
             );
 
             let failedChunks  = 0;

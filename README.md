@@ -10,6 +10,16 @@ Built on a stateless **JEV (JSON Event Vector) architecture** running on **Cloud
 
 ---
 
+## Screenshots
+
+| | |
+|---|---|
+| **FlashBar AI Utility Bar**<br>Command palette, quick-action chips, and the Case Triage card, docked in the Lightning Utility Bar<br><img src="docs/screenshots/utility-bar.png" width="380" /> | **Pop-out Mode**<br>Detach into a resizable standalone window — filters, drafts, and recent prompts carry over<br><img src="docs/screenshots/popout.png" width="380" /> |
+| **Natural-Language Search**<br>"show all leads" → filter chips, condition badges, and a sortable table — no SOQL written<br><img src="docs/screenshots/soql-search.png" width="380" /> | **Inline Edit Mode**<br>Edit results directly in the table with per-cell dirty tracking and bulk save<br><img src="docs/screenshots/inline-edit.png" width="380" /> |
+| **Works on Any Record Page**<br>The same palette follows you onto Opportunity, Case, or any other record page<br><img src="docs/screenshots/record-page.png" width="380" /> | **Record Summary, In Context**<br>Auto-generated summary card with clickable lookup links — no tab-switching to see key fields<br><img src="docs/screenshots/record-summary.png" width="380" /> |
+
+---
+
 ## Key Features
 
 - **Sub-second command palette** — Instant modal available from anywhere in Lightning Experience via `Cmd+K`/`Ctrl+K`, or `Cmd+/`/`Ctrl+/` (macOS Chrome reserves `Cmd+K` for its own "Search Tabs" command, which can prevent the page from ever seeing that keypress — `Cmd+/` is the reliable binding there)

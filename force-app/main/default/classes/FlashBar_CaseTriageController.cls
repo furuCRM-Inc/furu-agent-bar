@@ -76,7 +76,10 @@ public with sharing class FlashBar_CaseTriageController {
             req.setMethod('POST');
             req.setHeader('Content-Type', 'application/json');
             req.setBody(requestJson);
-            req.setTimeout(10000);
+            // 10s was routinely too short for real LLM inference latency (observed
+            // "ERROR: Read timed out" repeatedly, including on Worker cold starts).
+            // Callout wait time doesn't consume Apex CPU governor limits.
+            req.setTimeout(30000);
 
             HttpResponse res = new Http().send(req);
             if (res.getStatusCode() != 200) {
