@@ -14,7 +14,7 @@
   "name": "furu-agent-bar",
   "namespace": "",
   "sfdcLoginUrl": "https://login.salesforce.com",
-  "sourceApiVersion": "62.0",
+  "sourceApiVersion": "66.0",
   "packageAliases": {
     "FlashBar AI": "0Hoaj0000006EMrCAM"
   }

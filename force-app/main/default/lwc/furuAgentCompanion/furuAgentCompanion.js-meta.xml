@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
-    <apiVersion>62.0</apiVersion>
+    <apiVersion>66.0</apiVersion>
     <isExposed>true</isExposed>
     <masterLabel>furuAgent Companion</masterLabel>
     <description>Page-side companion for furuAgent Bar. Place on any record page — shows pending AI field changes with an animated card and lets users save or discard from the record page directly.</description>

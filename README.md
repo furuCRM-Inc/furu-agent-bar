@@ -1,7 +1,7 @@
 # FlashBar AI — Salesforce Command Palette & AI Acceleration Layer
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Salesforce API](https://img.shields.io/badge/Salesforce_API-62.0-blue)](https://developer.salesforce.com/docs/atlas.en-us.api.meta/api/)
+[![Salesforce API](https://img.shields.io/badge/Salesforce_API-66.0-blue)](https://developer.salesforce.com/docs/atlas.en-us.api.meta/api/)
 [![CI](https://github.com/furuCRM-Inc/furu-agent-bar/actions/workflows/flashbar-pipeline.yml/badge.svg)](https://github.com/furuCRM-Inc/furu-agent-bar/actions/workflows/flashbar-pipeline.yml)
 
 **FlashBar AI** is an open-source sub-second `Cmd+K` command palette and intelligent UI layer for Salesforce Lightning Experience. It replaces slow multi-tab legacy Salesforce navigation with intent-driven natural language search, inline relational filtering, dynamic column management, and AI-assisted mass editing — all without writing a single line of SOQL.
@@ -92,13 +92,13 @@ FlashBar AI separates **AI judgment** from **Salesforce execution**. Instead of 
 
 ## Enterprise Use Cases
 
-| Category | Use Case | JEV Type | Action |
-|---|---|---|---|
-| Command & Navigation | Intent-driven filter | `Choice` | Natural prompt → SOQL filter chips + dynamic columns |
-| Support & Operations | Case triage & routing | `Choice` + `Score` | Assigns to optimal queue with priority scoring |
-| Sales Operations | Lead qualification | `Score` + `Noul` | Routes leads or flags for review against target profile |
-| Data Hygiene | Mass record updates | `Choice` + `Confidence` | Previews 50+ field changes in ListEditor, updates safely |
-| Risk & Compliance | Escalation detection | `Noul` | Identifies high-risk accounts, triggers notification flows |
+| Category | Use Case | JEV Type | Action | Status |
+|---|---|---|---|---|
+| Command & Navigation | Intent-driven filter | `Choice` | Natural prompt → SOQL filter chips + dynamic columns | ✅ Shipped |
+| Support & Operations | Case triage & routing | `Choice` + `Score` + `Noul` | Scores urgency/churn risk, recommends a queue, reassigns on confirm (`FlashBar_CaseTriageController` + `flashBarCaseTriageCard`, placed on the Case record page) | ✅ Shipped |
+| Sales Operations | Lead qualification & assignment | `Score` | ICP-scores selected Leads (HOT/WARM/COLD) and round-robins them across reps, with a minimum-score threshold (`FlashBar_LeadAssigner` + `furuAgentLeadAssigner`, opened from the "🎯 クオリファイ&割当" action on Lead SOQL results) | ✅ Shipped |
+| Data Hygiene | Mass record updates | `Choice` + `Confidence` | Inline table edit and a standalone bulk editor overlay, both backed by `FlashBarMassEditService` (partial-success DML, FLS-checked) | ✅ Shipped |
+| Risk & Compliance | Escalation detection | `Noul` | `isImmediateEscalationRequired` flag returned alongside Case triage scoring | ✅ Shipped (part of Case triage) |
 
 ---
 
@@ -153,9 +153,18 @@ to point to your own worker URL before deploying.
    sf org assign permset --name FlashBar_Admin --target-org my-org
    ```
 
-2. **Add to Utility Bar** — In Lightning App Builder, open your app's Utility Bar and add `c-furu-agent-bar` with the keyboard shortcut set to `Cmd+K`.
+2. **Add to Utility Bar** — In Lightning App Builder, open your app's Utility Bar and add `c-furu-agent-bar`. The palette opens on `Cmd+K`/`Ctrl+K`; on macOS Chrome that shortcut is reserved by the browser's own "Search Tabs" command before the page ever sees the keypress, so `Cmd+/`/`Ctrl+/` is wired up as a working fallback — no extra config needed, both just work.
 
 3. **Named Credential** — The default Named Credential (`FuruAgent_Backend`) points to the hosted FlashBar AI backend. No changes needed for the standard install.
+
+4. **Lead Qualify & Assign** — No setup required. Run any Lead search (e.g. "show all leads"), switch to table view, and the "🎯 クオリファイ&割当" action appears automatically — it's gated purely on the SOQL result's sObject being `Lead`.
+
+5. **Case Triage card** — Requires one manual placement step; it isn't wired into any existing page by default:
+   1. Open any Case record → gear icon (⚙) → **Edit Page**
+   2. Drag **FlashBar Case Triage Card** (`flashBarCaseTriageCard`) from the component list onto the page
+   3. Save → **Activation** → set as the org default for Case
+   
+   This can't currently be done via a metadata deploy — Lightning Record Pages inherit their available regions from a managed base page (`parentFlexiPage`, e.g. `sfa__Account_rec_L` for the standard Account page) that Case doesn't have a public equivalent for in every org edition, so App Builder's own region validation has to run interactively.
 
 ---
 
@@ -171,18 +180,36 @@ force-app/main/default/
 │   ├── FlashBarSchemaCacheService.cls   # L1→L2→L3 schema cache
 │   ├── FlashBarNavigationController.cls # Personal nav items (pins)
 │   ├── FlashBarOCRController.cls        # Agentforce Vision / OCR
+│   ├── FlashBar_CaseTriageController.cls # Case triage: urgency/churn score → queue routing
+│   ├── FlashBar_LeadAssigner.cls        # Lead ICP qualify → round-robin assignment
 │   └── ...
-├── lwc/furuAgentBar/          # Lightning Web Component (single bundle)
-├── objects/                   # Custom objects: FuruAgent_Knowledge__c, FlashBar_Nav_Item__c
+├── lwc/
+│   ├── furuAgentBar/            # Main command-palette bundle (host to everything below)
+│   ├── furuAgentCompanion/      # Companion/side-panel view
+│   ├── furuAgentMassEditor/     # Bulk field-edit overlay over SOQL results
+│   ├── furuAgentLeadAssigner/   # Lead qualify + round-robin assign overlay (Lead SOQL results only)
+│   └── flashBarCaseTriageCard/  # Case record-page triage card
+├── objects/                   # Custom objects + fields added to standard objects
+│   ├── FuruAgent_Knowledge__c/  # Self-learning validation-rule dictionary
+│   ├── FlashBar_Nav_Item__c/    # Personal nav pins
+│   ├── Contact/fields/          # CSV_External_Key__c
+│   └── Account/fields/          # SLA__c (used by Case triage scoring)
 ├── permissionSets/            # FlashBar_User, FlashBar_Admin
 ├── namedCredentials/          # FuruAgent_Backend (points to hosted backend)
 └── remoteSiteSettings/        # Allowlist for the backend callout
 
-tests/e2e/specs/               # Playwright end-to-end tests (16 suites)
+e2e-config/                    # Playwright test-harness-only metadata (NOT packaged —
+                                # excluded from force-app on purpose; see docs/CUSTOMIZATION.md)
+tests/e2e/specs/               # Playwright end-to-end tests (22 suites)
+docs/
+├── test_scenarios.md          # Test coverage reference
+└── CUSTOMIZATION.md           # How to set up, extend, and package this repo
 config/
 └── project-scratch-def.json   # Scratch org definition for CI
 .github/workflows/
 └── flashbar-pipeline.yml      # CI/CD: lint → apex tests → package build → release
+.claude/commands/
+└── package-release.md         # /package-release — local packaging + release + docs refresh
 ```
 
 ---
@@ -220,10 +247,13 @@ Then add the following secrets to your GitHub repository:
 
 ```bash
 cp .env.example .env
-# Fill in SF_INSTANCE_URL, SF_USERNAME, SF_PASSWORD (or SF_ACCESS_TOKEN), SF_APP_URL
+# Fill in SF_INSTANCE_URL, SF_APP_URL, SF_ADMIN_ACCESS_TOKEN,
+# SF_EN_USERNAME/SF_EN_PASSWORD, SF_JA_USERNAME/SF_JA_PASSWORD
 npm run test:e2e:install
 npm run test:e2e
 ```
+
+The admin token builds EN/JA test-user sessions via "Login As" (no separate device verification needed for those two), which is why both a token and two username/password pairs are required — see `tests/e2e/setup/globalSetup.ts`.
 
 ---
 
