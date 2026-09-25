@@ -114,6 +114,8 @@ FlashBar AI separates **AI judgment** from **Salesforce execution**. Instead of 
 
 ## Installation
 
+> **Step-by-step admin manual (Japanese):** [docs/SETUP_MANUAL.md](docs/SETUP_MANUAL.md) — click-by-click install, permission set assignment, Utility Bar setup, Lead Assigner / Case Triage configuration, and troubleshooting, for admins working entirely from Setup UI (no CLI needed).
+
 ### Option 1 — Unlocked Package (Recommended)
 
 Install directly from the latest GitHub Release:
