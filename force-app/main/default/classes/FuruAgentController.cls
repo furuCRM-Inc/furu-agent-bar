@@ -111,18 +111,25 @@ public with sharing class FuruAgentController {
     @AuraEnabled(cacheable=true)
     public static List<String> getApprovedRules(String sObjectType) {
         if (String.isBlank(sObjectType)) return new List<String>();
-        List<FuruAgent_Knowledge__c> recs = [
-            SELECT Plain_English_Rule__c FROM FuruAgent_Knowledge__c
-            WHERE Target_sObject__c = :sObjectType
-            AND   Status__c = 'Approved'
-            ORDER BY Occurrences__c DESC NULLS LAST
-            LIMIT 5
-        ];
-        List<String> out = new List<String>();
-        for (FuruAgent_Knowledge__c r : recs) {
-            if (String.isNotBlank(r.Plain_English_Rule__c)) out.add(r.Plain_English_Rule__c);
+        try {
+            List<FuruAgent_Knowledge__c> recs = [
+                SELECT Plain_English_Rule__c FROM FuruAgent_Knowledge__c
+                WHERE Target_sObject__c = :sObjectType
+                AND   Status__c = 'Approved'
+                ORDER BY Occurrences__c DESC NULLS LAST
+                LIMIT 5
+            ];
+            List<String> out = new List<String>();
+            for (FuruAgent_Knowledge__c r : recs) {
+                if (String.isNotBlank(r.Plain_English_Rule__c)) out.add(r.Plain_English_Rule__c);
+            }
+            return out;
+        } catch (Exception e) {
+            // This is an ambient/best-effort context panel — never let a schema or
+            // permission gap here surface as the platform's generic cacheable-method
+            // "Script-thrown exception" toast on top of an otherwise-successful search.
+            return new List<String>();
         }
-        return out;
     }
 
     // ── CSV Bulk Import ───────────────────────────────────────────────────────
