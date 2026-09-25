@@ -113,6 +113,15 @@ Install directly from the latest GitHub Release:
 | Production / Developer Org | See [Releases](https://github.com/furuCRM-Inc/furu-agent-bar/releases/latest) |
 | Sandbox | See [Releases](https://github.com/furuCRM-Inc/furu-agent-bar/releases/latest) |
 
+> **Note:** The unlocked package does not include Agentforce Vision document OCR
+> (`FlashBarOCRController` / drag-and-drop image or PDF import). It requires
+> `ConnectApi.EinsteinLLM`, which isn't grantable in the disposable org Salesforce
+> uses to validate unlocked package versions, so it can't ship in the package build.
+> Dropping a **CSV** file still works normally (bulk import is unaffected — it's a
+> separate code path). If you need OCR, deploy via **Option 2** instead and also
+> include `internal-only/main/default/classes/FlashBarOCRController.cls(-meta.xml)`
+> in your deploy — see `docs/CUSTOMIZATION.md`.
+
 ### Option 2 — Deploy Source via SF CLI
 
 ```bash
@@ -129,14 +138,16 @@ sf project deploy start --target-org my-org --ignore-warnings
 
 ### Option 3 — Self-host the Cloudflare Worker Backend
 
-For teams that want full data sovereignty:
+For teams that want full data sovereignty. The backend lives in a separate
+repository, `flash-agent-stack` (the `apps/backend` workspace):
 
 ```bash
 # Clone the worker repo (separate repository)
-git clone https://github.com/furuCRM-Inc/flashbar-worker.git
-cd flashbar-worker
+git clone https://github.com/furuCRM-Inc/flash-agent-stack.git
+cd flash-agent-stack/apps/backend
 npm install
-npx wrangler deploy --env production
+npm run deploy:cf         # free-tier bindings (AI + KV)
+# npm run deploy:cf:prod  # adds rate limiting + extended CPU — requires a Workers paid plan
 ```
 
 Then update `force-app/main/default/namedCredentials/FuruAgent_Backend.namedCredential-meta.xml`
