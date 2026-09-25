@@ -51,7 +51,11 @@ public with sharing class FlashBar_LeadAssigner {
             req.setMethod('POST');
             req.setHeader('Content-Type', 'application/json');
             req.setBody(requestJson);
-            req.setTimeout(15000);
+            // Scores a whole batch of leads (up to 20 in the UI) in one LLM call, unlike
+            // the single-record Case Triage callout — 15s was routinely too short and
+            // surfaced as "ERROR: Read timed out". Callout wait time doesn't consume Apex
+            // CPU governor limits, so this is safe to raise well above that.
+            req.setTimeout(60000);
 
             HttpResponse res = new Http().send(req);
             if (res.getStatusCode() != 200) {

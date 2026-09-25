@@ -6,6 +6,10 @@ import assignLeadsRoundRobin from '@salesforce/apex/FlashBar_LeadAssigner.assign
 
 const TIER_CLASS = { HOT: 'fla-tier--hot', WARM: 'fla-tier--warm', COLD: 'fla-tier--cold' };
 
+// Leads per qualifyLeads() round-trip. Smaller batches keep each LLM prompt fast
+// and let independent chunks fail without blanking the whole table.
+const CHUNK_SIZE = 5;
+
 const USER_PICKER_MATCHING_INFO = {
     primaryField: { fieldPath: 'Name' },
 };
@@ -33,6 +37,7 @@ export default class FuruAgentLeadAssigner extends LightningElement {
 
     async _loadScores() {
         this._isLoading = true;
+        this._scoreMap  = {};
         try {
             // qualifyLeads() forwards this JSON to the Worker verbatim (no server-side
             // shaping) — it expects { leads: [{leadId, company, title, ...}] }, not a
@@ -52,12 +57,41 @@ export default class FuruAgentLeadAssigner extends LightningElement {
                     leadSource:        r.LeadSource,
                 }))
                 .filter(l => l.leadId);
-            const result = await qualifyLeads({ requestJson: JSON.stringify({ leads }) });
-            this._scoreMap = {};
-            for (const s of (result?.scores ?? [])) this._scoreMap[s.leadId] = s;
-            if (result?.status && result.status !== 'SUCCESS') {
+
+            // One giant batch = one giant LLM prompt = the request most likely to hit a
+            // callout timeout, and an all-or-nothing failure if it does. Chunking into
+            // small parallel round-trips keeps each individual prompt fast, and a failed
+            // chunk only blanks its own leads' scores instead of the whole table.
+            const chunks = [];
+            for (let i = 0; i < leads.length; i += CHUNK_SIZE) {
+                chunks.push(leads.slice(i, i + CHUNK_SIZE));
+            }
+
+            const settled = await Promise.allSettled(
+                chunks.map(chunk => qualifyLeads({ requestJson: JSON.stringify({ leads: chunk }) }))
+            );
+
+            let failedChunks  = 0;
+            let lastErrorText = '';
+            for (const outcome of settled) {
+                if (outcome.status === 'fulfilled') {
+                    const result = outcome.value;
+                    for (const s of (result?.scores ?? [])) this._scoreMap[s.leadId] = s;
+                    if (result?.status && result.status !== 'SUCCESS') {
+                        failedChunks++;
+                        lastErrorText = result.status;
+                    }
+                } else {
+                    failedChunks++;
+                    lastErrorText = outcome.reason?.body?.message ?? outcome.reason?.message ?? 'Unknown error';
+                }
+            }
+
+            if (failedChunks > 0) {
                 this._resultMsgType = 'warning';
-                this._resultMsg = result.status;
+                this._resultMsg = chunks.length > 1
+                    ? `⚠️ ${failedChunks}/${chunks.length}件のバッチでスコア取得に失敗しました（${lastErrorText}）。一部のリードはスコアなしで表示されます。`
+                    : lastErrorText;
             }
         } catch (err) {
             this._resultMsgType = 'error';
