@@ -13,8 +13,7 @@ import getJapaneseAddress        from '@salesforce/apex/FuruAgentController.getJ
 import getObjectFieldInsights    from '@salesforce/apex/FuruAgentController.getObjectFieldInsights';
 import getApprovedRules          from '@salesforce/apex/FuruAgentController.getApprovedRules';
 import searchParentRecords       from '@salesforce/apex/FuruAgentController.searchParentRecords';
-import processDocumentViaAgentforce    from '@salesforce/apex/FlashBarOCRController.processDocumentViaAgentforce';
-import importOcrToRecord              from '@salesforce/apex/FlashBarOCRController.importOcrToRecord';
+import createRecordFromFields         from '@salesforce/apex/FlashBarRecordCreateService.createRecordFromFields';
 import { extractPostalCode, extractAddressTail, mapAddressToFields, getCachedAddress, setCachedAddress } from './jpAddressService';
 import { parseCsv, buildRecords, sampleRows } from './csvParser';
 import bulkImportCsv      from '@salesforce/apex/FuruAgentController.bulkImportCsv';
@@ -2140,90 +2139,22 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         this._isOcrLoading     = false;
     }
 
+    // Vision/Agentforce document extraction (FlashBarOCRController) is excluded from
+    // the unlocked package — the packaging validation org can't grant
+    // ConnectApi.EinsteinLLM access — so this only routes CSV to bulk import now.
+    // Self-hosted/direct-deploy installs still have the class; re-add the Vision
+    // call here if you're not shipping via the unlocked package.
     async _startOcr(file) {
-        // Route CSV files to bulk import instead of OCR
         if (file.name?.toLowerCase().endsWith('.csv') || file.type === 'text/csv') {
             await this._startCsvImport(file);
             return;
         }
-        const ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'application/pdf'];
-        if (!ALLOWED.includes(file.type)) {
-            this._setStatus('対応形式: JPG · PNG · WebP · PDF · CSV', 'warning');
-            return;
-        }
-        if (file.size > 5 * 1024 * 1024) {
-            this._setStatus('ファイルサイズが上限 (5 MB) を超えています。', 'warning');
-            return;
-        }
-
-        this._isOcrLoading    = true;
-        this._attachedFileName = file.name;
-        this._setStatus('Agentforce Vision 解析中...', 'info');
-
-        try {
-            // Read file as base64 (strip data:...;base64, prefix)
-            const base64 = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload  = () => resolve(reader.result.split(',')[1]);
-                reader.onerror = reject;
-                reader.readAsDataURL(file);
-            });
-
-            const result = await processDocumentViaAgentforce({
-                base64Image:   base64,
-                mimeType:      file.type,
-                targetObject:  this._sObjectType ?? 'Lead',
-                recordId:      this._recordId   ?? '',
-            });
-
-            if (result.errorMessage) {
-                this._setStatus('OCR エラー: ' + result.errorMessage, 'error');
-                return;
-            }
-
-            const fields = result.extractedFields ?? {};
-            if (!Object.keys(fields).length) {
-                this._setStatus('フィールドを検出できませんでした。', 'warning');
-                return;
-            }
-
-            // Resolved target (Agentforce may have detected BUSINESS_CARD → Lead, etc.)
-            const targetSObj   = result.targetSObject ?? this._sObjectType ?? 'Lead';
-            const isUpdate     = !!(this._recordId) && targetSObj === this._sObjectType;
-            const updateId     = isUpdate ? this._recordId : null;
-
-            // Auto-bind parent if creating a child on a matching parent page
-            // e.g. meeting note dropped on Account page → Opportunity inherits AccountId
-            const childCfg = (CHILD_ACTIONS[this._sObjectType] ?? []).find(c => c.sObject === targetSObj);
-            if (childCfg && this._recordId && !isUpdate) {
-                this._parentState = {
-                    field:          childCfg.field,
-                    parentSObj:     this._sObjectType,
-                    labelJa:        SOBJECT_LABELS_JA[this._sObjectType] ?? this._sObjectType,
-                    labelEn:        this._sObjectType,
-                    selectedParent: { id: this._recordId, name: this.contextLabel },
-                    candidates: [], isSearching: false, autobound: true, searchText: '',
-                };
-            }
-
-            this._doPrefill({
-                intent:         'EXTRACT_AND_PREFILL',
-                isOcr:          true,
-                docType:        result.docType  ?? 'OTHER',
-                confidence:     result.confidence ?? 0,
-                fields,
-                updateSObject:  targetSObj,
-                updateRecordId: updateId,
-                message:        this.isJa
-                    ? `${Object.keys(fields).length} 件のフィールドを抽出しました（信頼度 ${Math.round((result.confidence ?? 0) * 100)}%）`
-                    : `${Object.keys(fields).length} fields extracted (confidence ${Math.round((result.confidence ?? 0) * 100)}%)`,
-            });
-            this._attachedFileName = null;
-        } catch (err) {
-            this._setStatus('Vision OCR エラー: ' + (err.body?.message ?? err.message ?? 'Unknown'), 'error');
-        } finally {
-            this._isOcrLoading = false;
-        }
+        this._setStatus(
+            this.isJa
+                ? '画像/PDF解析は現在ご利用いただけません。CSVファイルをご利用ください。'
+                : 'Image/PDF parsing is currently unavailable. Please use a CSV file.',
+            'warning'
+        );
     }
 
     // ── Main submit ───────────────────────────────────────────────────────────
@@ -3323,7 +3254,7 @@ export default class FuruAgentBar extends NavigationMixin(LightningElement) {
         const fields = action.fields ?? {};
         this._ocrImporting = true;
         try {
-            const newId = await importOcrToRecord({
+            const newId = await createRecordFromFields({
                 sObjectApiName: sObj,
                 fieldsJson:     JSON.stringify(fields),
                 recordId:       '',
