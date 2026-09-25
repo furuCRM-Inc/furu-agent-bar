@@ -34,8 +34,25 @@ export default class FuruAgentLeadAssigner extends LightningElement {
     async _loadScores() {
         this._isLoading = true;
         try {
-            const leadIds = (this.records ?? []).map(r => r.Id ?? r.id).filter(Boolean);
-            const result = await qualifyLeads({ requestJson: JSON.stringify({ leadIds }) });
+            // qualifyLeads() forwards this JSON to the Worker verbatim (no server-side
+            // shaping) — it expects { leads: [{leadId, company, title, ...}] }, not a
+            // bare leadIds array. Send whatever fields the current SOQL columns gave us;
+            // the Worker treats missing ones as "unknown" signals rather than erroring.
+            const leads = (this.records ?? [])
+                .map(r => ({
+                    leadId:            r.Id ?? r.id,
+                    firstName:         r.FirstName,
+                    lastName:          r.LastName,
+                    company:           r.Company,
+                    title:             r.Title,
+                    email:             r.Email,
+                    annualRevenue:     r.AnnualRevenue,
+                    numberOfEmployees: r.NumberOfEmployees,
+                    industry:          r.Industry,
+                    leadSource:        r.LeadSource,
+                }))
+                .filter(l => l.leadId);
+            const result = await qualifyLeads({ requestJson: JSON.stringify({ leads }) });
             this._scoreMap = {};
             for (const s of (result?.scores ?? [])) this._scoreMap[s.leadId] = s;
             if (result?.status && result.status !== 'SUCCESS') {
